@@ -91,9 +91,17 @@ module CodeGen =
             (renderOption renderBorderSide b.Top)
             (renderOption renderBorderSide b.Bottom)
 
+    let private renderTabStop (t: TabStop) : string =
+        let alignment =
+            match t.Alignment with
+            | OtherTabAlignment raw -> sprintf "OtherTabAlignment %s" (quote raw)
+            | other -> sprintf "%A" other
+
+        sprintf "{ Position = %g; Alignment = %s; Leader = %A }" t.Position alignment t.Leader
+
     let private renderParagraphFormat (f: ParagraphFormat) : string =
         sprintf
-            "{ ParagraphFormat.Default with Alignment = %s; SpacingBefore = %s; SpacingAfter = %s; LineSpacing = %s; Indentation = %s; KeepWithNext = %b; PageBreakBefore = %b; Borders = %s; Shading = %s }"
+            "{ ParagraphFormat.Default with Alignment = %s; SpacingBefore = %s; SpacingAfter = %s; LineSpacing = %s; Indentation = %s; KeepWithNext = %b; PageBreakBefore = %b; Borders = %s; Shading = %s; TabStops = %s }"
             (renderOption (sprintf "%A") f.Alignment)
             (renderOption string f.SpacingBefore)
             (renderOption string f.SpacingAfter)
@@ -103,6 +111,7 @@ module CodeGen =
             f.PageBreakBefore
             (renderOption renderBorderStyle f.Borders)
             (renderOption renderColor f.Shading)
+            (renderList renderTabStop f.TabStops)
 
     let private renderTableBorders (b: TableBorders) : string =
         sprintf
@@ -119,6 +128,14 @@ module CodeGen =
             s.LastRowBanding
             s.BandedRows
             s.BandedColumns
+
+    let private renderCellMargins (m: CellMargins) : string =
+        sprintf
+            "{ Top = %s; Bottom = %s; Left = %s; Right = %s }"
+            (renderOption string m.Top)
+            (renderOption string m.Bottom)
+            (renderOption string m.Left)
+            (renderOption string m.Right)
 
     let private renderImageEntry (img: ImageEntry) : string =
         // Image bytes are rendered as a base64 literal decoded at script-run time, rather
@@ -185,15 +202,20 @@ module CodeGen =
         sprintf "{ Content = %s; Props = %s }" (renderList renderBlock c.Content) (renderTableCellProps c.Props)
 
     and private renderTableRow (r: TableRow) : string =
-        sprintf "{ Cells = %s; Height = %s }" (renderList renderTableCell r.Cells) (renderOption string r.Height)
+        sprintf
+            "{ Cells = %s; Height = %s; RepeatAsHeader = %b }"
+            (renderList renderTableCell r.Cells)
+            (renderOption string r.Height)
+            r.RepeatAsHeader
 
     and private renderTableEntry (t: TableEntry) : string =
         sprintf
-            "{ Rows = %s; ColumnWidths = %s; Style = %s; Borders = %s }"
+            "{ Rows = %s; ColumnWidths = %s; Style = %s; Borders = %s; CellMargins = %s }"
             (renderList renderTableRow t.Rows)
             (renderList string t.ColumnWidths)
             (renderOption renderTableStyleRef t.Style)
             (renderOption renderTableBorders t.Borders)
+            (renderOption renderCellMargins t.CellMargins)
 
     let private renderPageSize (p: PageSize) : string =
         match p with
@@ -265,6 +287,24 @@ module CodeGen =
     let private renderDocumentProtection (p: DocumentProtection) : string =
         sprintf "{ Edit = %s; Password = %s }" (renderOption (sprintf "%A") p.Edit) (renderOption quote p.Password)
 
+    let private renderTableStyleRegion (r: TableStyleRegion) : string =
+        sprintf
+            "{ RunFormat = %s; ParaFormat = %s; CellShading = %s }"
+            (renderOption renderRunStyle r.RunFormat)
+            (renderOption renderParagraphFormat r.ParaFormat)
+            (renderOption renderColor r.CellShading)
+
+    let private renderTableStyleDefinition (d: TableStyleDefinition) : string =
+        sprintf
+            "{ Id = %s; Name = %s; BasedOn = %s; Borders = %s; WholeTable = %s; FirstRow = %s; BandedRow = %s }"
+            (quote d.Id)
+            (quote d.Name)
+            (renderOption quote d.BasedOn)
+            (renderOption renderTableBorders d.Borders)
+            (renderTableStyleRegion d.WholeTable)
+            (renderTableStyleRegion d.FirstRow)
+            (renderTableStyleRegion d.BandedRow)
+
     let private renderDocumentProperties (p: DocumentProperties) : string =
         sprintf
             "{ Title = %s; Author = %s; Subject = %s; Keywords = %s; Comments = %s; Category = %s; Company = %s }"
@@ -287,13 +327,14 @@ module CodeGen =
         sb.AppendLine("open Kookerella.FsWordDsl") |> ignore
         sb.AppendLine() |> ignore
 
-        sb.AppendLine(sprintf "let doc: Document = { Sections = %s; Styles = %s; Numbering = %s; Protection = %s; VbaProject = %s; Properties = %s }"
+        sb.AppendLine(sprintf "let doc: Document = { Sections = %s; Styles = %s; Numbering = %s; Protection = %s; VbaProject = %s; Properties = %s; TableStyles = %s }"
                           (renderList renderSection doc.Sections)
                           (renderList renderStyleDefinition doc.Styles)
                           (renderList renderNumberingDefinition doc.Numbering)
                           (renderOption renderDocumentProtection doc.Protection)
                           (renderOption (fun (b: byte[]) -> sprintf "System.Convert.FromBase64String(%s)" (quote (System.Convert.ToBase64String(b)))) doc.VbaProject)
-                          (renderDocumentProperties doc.Properties))
+                          (renderDocumentProperties doc.Properties)
+                          (renderList renderTableStyleDefinition doc.TableStyles))
         |> ignore
 
         sb.AppendLine() |> ignore

@@ -314,6 +314,58 @@ module StyleRegistry =
     let private twentiethsOfPoint (pts: float) : int = int (Math.Round(pts * 20.0))
     let private pointsOfTwentieths (v: int) : float = float v / 20.0
 
+    // --- Tab stops -----------------------------------------------------------------------
+
+    let tabStopAlignmentToW (a: TabStopAlignment) : Wordprocessing.TabStopValues =
+        match a with
+        | LeftTab -> Wordprocessing.TabStopValues.Left
+        | CenterTab -> Wordprocessing.TabStopValues.Center
+        | RightTab -> Wordprocessing.TabStopValues.Right
+        | DecimalTab -> Wordprocessing.TabStopValues.Decimal
+        | BarTab -> Wordprocessing.TabStopValues.Bar
+        | OtherTabAlignment raw -> Wordprocessing.TabStopValues raw
+
+    let tabStopAlignmentOfW (v: Wordprocessing.TabStopValues) : TabStopAlignment =
+        if v = Wordprocessing.TabStopValues.Left then LeftTab
+        elif v = Wordprocessing.TabStopValues.Center then CenterTab
+        elif v = Wordprocessing.TabStopValues.Right then RightTab
+        elif v = Wordprocessing.TabStopValues.Decimal then DecimalTab
+        elif v = Wordprocessing.TabStopValues.Bar then BarTab
+        else OtherTabAlignment(v.ToString())
+
+    let tabLeaderToW (l: TabLeader) : Wordprocessing.TabStopLeaderCharValues =
+        match l with
+        | NoLeader -> Wordprocessing.TabStopLeaderCharValues.None
+        | DotLeader -> Wordprocessing.TabStopLeaderCharValues.Dot
+        | HyphenLeader -> Wordprocessing.TabStopLeaderCharValues.Hyphen
+        | UnderscoreLeader -> Wordprocessing.TabStopLeaderCharValues.Underscore
+        | HeavyLeader -> Wordprocessing.TabStopLeaderCharValues.Heavy
+        | MiddleDotLeader -> Wordprocessing.TabStopLeaderCharValues.MiddleDot
+
+    let tabLeaderOfW (v: Wordprocessing.TabStopLeaderCharValues) : TabLeader =
+        if v = Wordprocessing.TabStopLeaderCharValues.Dot then DotLeader
+        elif v = Wordprocessing.TabStopLeaderCharValues.Hyphen then HyphenLeader
+        elif v = Wordprocessing.TabStopLeaderCharValues.Underscore then UnderscoreLeader
+        elif v = Wordprocessing.TabStopLeaderCharValues.Heavy then HeavyLeader
+        elif v = Wordprocessing.TabStopLeaderCharValues.MiddleDot then MiddleDotLeader
+        else NoLeader
+
+    let tabStopToW (t: TabStop) : Wordprocessing.TabStop =
+        Wordprocessing.TabStop(Val = EnumValue(tabStopAlignmentToW t.Alignment), Position = Int32Value(twentiethsOfPoint t.Position), Leader = EnumValue(tabLeaderToW t.Leader))
+
+    let tabStopOfW (t: Wordprocessing.TabStop) : TabStop =
+        { Position = t.Position |> Option.ofObj |> Option.map (fun v -> pointsOfTwentieths v.Value) |> Option.defaultValue 0.0
+          Alignment = t.Val |> Option.ofObj |> Option.map (fun v -> tabStopAlignmentOfW v.Value) |> Option.defaultValue LeftTab
+          Leader = t.Leader |> Option.ofObj |> Option.map (fun v -> tabLeaderOfW v.Value) |> Option.defaultValue NoLeader }
+
+    let tabsToW (stops: TabStop list) : Wordprocessing.Tabs =
+        let tabs = Wordprocessing.Tabs()
+        stops |> List.iter (fun t -> tabs.AppendChild(tabStopToW t) |> ignore)
+        tabs
+
+    let tabsOfW (tabs: Wordprocessing.Tabs) : TabStop list =
+        tabs.Elements<Wordprocessing.TabStop>() |> Seq.map tabStopOfW |> List.ofSeq
+
     let indentationToW (ind: Indentation) : Wordprocessing.Indentation =
         let i = Wordprocessing.Indentation()
         ind.Left |> Option.iter (fun v -> i.Left <- StringValue(string (twentiethsOfPoint v)))
@@ -388,7 +440,10 @@ module StyleRegistry =
                 f.Borders |> Option.iter (fun b -> pPr.ParagraphBorders <- paragraphBordersToW b)
 
                 f.Shading
-                |> Option.iter (fun c -> pPr.Shading <- Wordprocessing.Shading(Val = EnumValue Wordprocessing.ShadingPatternValues.Clear, Color = StringValue "auto", Fill = StringValue(colorToHex c))))
+                |> Option.iter (fun c -> pPr.Shading <- Wordprocessing.Shading(Val = EnumValue Wordprocessing.ShadingPatternValues.Clear, Color = StringValue "auto", Fill = StringValue(colorToHex c)))
+
+                if not f.TabStops.IsEmpty then
+                    pPr.Tabs <- tabsToW f.TabStops)
 
             Some pPr
 
@@ -404,6 +459,7 @@ module StyleRegistry =
                 || isNull pPr.PageBreakBefore |> not
                 || isNull pPr.ParagraphBorders |> not
                 || isNull pPr.Shading |> not
+                || isNull pPr.Tabs |> not
 
             if not hasAny then
                 None
@@ -464,7 +520,8 @@ module StyleRegistry =
                       KeepWithNext = not (isNull pPr.KeepNext)
                       PageBreakBefore = not (isNull pPr.PageBreakBefore)
                       Borders = if isNull pPr.ParagraphBorders then None else Some(paragraphBordersOfW pPr.ParagraphBorders)
-                      Shading = if isNull pPr.Shading then None else pPr.Shading.Fill |> Option.ofObj |> Option.map (fun v -> colorOfHex v.Value) }
+                      Shading = if isNull pPr.Shading then None else pPr.Shading.Fill |> Option.ofObj |> Option.map (fun v -> colorOfHex v.Value)
+                      TabStops = if isNull pPr.Tabs then [] else tabsOfW pPr.Tabs }
 
     let styleIdOfParagraphProperties (pPr: Wordprocessing.ParagraphProperties option) : string option =
         match pPr with
@@ -521,11 +578,16 @@ module StyleRegistry =
 
         Wordprocessing.Styles(styleElements)
 
+    /// Only paragraph/character styles - `w:type="table"` entries are `Document.TableStyles`
+    /// instead (see `tableStylesOfOpenXml` below), and would otherwise get misread here as
+    /// spurious `ParagraphStyleType` entries (this DSL doesn't write `w:type="numbering"`
+    /// styles itself, but skips those too rather than misreading them the same way).
     let stylesOfOpenXml (styles: Wordprocessing.Styles option) : StyleDefinition list =
         match styles with
         | None -> []
         | Some styles ->
             styles.Elements<Wordprocessing.Style>()
+            |> Seq.filter (fun s -> isNull s.Type || s.Type.Value = Wordprocessing.StyleValues.Paragraph || s.Type.Value = Wordprocessing.StyleValues.Character)
             |> Seq.map (fun s ->
                 let paraFormat =
                     if isNull s.StyleParagraphProperties then
@@ -551,4 +613,123 @@ module StyleRegistry =
                   BasedOn = (if isNull s.BasedOn then None else s.BasedOn.Val |> Option.ofObj |> Option.map (fun v -> v.Value))
                   RunFormat = runFormat
                   ParaFormat = paraFormat })
+            |> List.ofSeq
+
+    // --- Table style definitions (styles.xml, w:type="table") ----------------------------
+
+    let private tableBordersToOpenXml (b: TableBorders) : Wordprocessing.TableBorders =
+        let tb = Wordprocessing.TableBorders()
+        b.Outer.Top |> Option.iter (fun s -> tb.TopBorder <- borderSideToTop s)
+        b.Outer.Bottom |> Option.iter (fun s -> tb.BottomBorder <- borderSideToBottom s)
+        b.Outer.Left |> Option.iter (fun s -> tb.LeftBorder <- borderSideToLeft s)
+        b.Outer.Right |> Option.iter (fun s -> tb.RightBorder <- borderSideToRight s)
+        b.InsideHorizontal |> Option.iter (fun s -> tb.InsideHorizontalBorder <- borderSideToInsideH s)
+        b.InsideVertical |> Option.iter (fun s -> tb.InsideVerticalBorder <- borderSideToInsideV s)
+        tb
+
+    let private tableBordersOfOpenXml (tb: Wordprocessing.TableBorders) : TableBorders =
+        { Outer =
+            { Left = tb.LeftBorder |> Option.ofObj |> Option.map borderSideOfLeft
+              Right = tb.RightBorder |> Option.ofObj |> Option.map borderSideOfRight
+              Top = tb.TopBorder |> Option.ofObj |> Option.map borderSideOfTop
+              Bottom = tb.BottomBorder |> Option.ofObj |> Option.map borderSideOfBottom }
+          InsideHorizontal = tb.InsideHorizontalBorder |> Option.ofObj |> Option.map borderSideOfInsideH
+          InsideVertical = tb.InsideVerticalBorder |> Option.ofObj |> Option.map borderSideOfInsideV }
+
+    let private tableStyleRegionToOpenXml (kind: Wordprocessing.TableStyleOverrideValues) (region: TableStyleRegion) : Wordprocessing.TableStyleProperties option =
+        if region = TableStyleRegion.None then
+            None
+        else
+            let tsp = Wordprocessing.TableStyleProperties(Type = EnumValue kind)
+
+            region.RunFormat
+            |> Option.iter (fun rf ->
+                match runPropertiesOf (Some rf) None with
+                | Some rPr -> tsp.RunPropertiesBaseStyle <- Wordprocessing.RunPropertiesBaseStyle(rPr.ChildElements |> Seq.map (fun c -> c.CloneNode true))
+                | None -> ())
+
+            region.ParaFormat
+            |> Option.iter (fun pf ->
+                match paragraphPropertiesOf None (Some pf) with
+                | Some pPr -> tsp.StyleParagraphProperties <- Wordprocessing.StyleParagraphProperties(pPr.ChildElements |> Seq.map (fun c -> c.CloneNode true))
+                | None -> ())
+
+            region.CellShading
+            |> Option.iter (fun c ->
+                let tcPr = Wordprocessing.TableStyleConditionalFormattingTableCellProperties()
+                tcPr.Shading <- Wordprocessing.Shading(Val = EnumValue Wordprocessing.ShadingPatternValues.Clear, Color = StringValue "auto", Fill = StringValue(colorToHex c))
+                tsp.TableStyleConditionalFormattingTableCellProperties <- tcPr)
+
+            Some tsp
+
+    let private tableStyleRegionOfOpenXml (tsp: Wordprocessing.TableStyleProperties) : TableStyleRegion =
+        let runFormat =
+            tsp.RunPropertiesBaseStyle
+            |> Option.ofObj
+            |> Option.bind (fun rpb -> runStyleOfProperties (Some(Wordprocessing.RunProperties(rpb.ChildElements |> Seq.map (fun c -> c.CloneNode true)))))
+
+        let paraFormat =
+            tsp.StyleParagraphProperties
+            |> Option.ofObj
+            |> Option.bind (fun spp -> paragraphFormatOfProperties (Some(Wordprocessing.ParagraphProperties(spp.ChildElements |> Seq.map (fun c -> c.CloneNode true)))))
+
+        let cellShading =
+            tsp.TableStyleConditionalFormattingTableCellProperties
+            |> Option.ofObj
+            |> Option.bind (fun tcp -> tcp.Shading |> Option.ofObj)
+            |> Option.bind (fun sh -> sh.Fill |> Option.ofObj)
+            |> Option.map (fun v -> colorOfHex v.Value)
+
+        { RunFormat = runFormat; ParaFormat = paraFormat; CellShading = cellShading }
+
+    /// Builds one `w:style[@w:type='table']` element per definition, to append to the same
+    /// `Wordprocessing.Styles` collection `stylesToOpenXml` builds - kept as a separate
+    /// function (rather than folded into `stylesToOpenXml`) since `Document.TableStyles` is
+    /// its own field, not part of `Document.Styles`.
+    let tableStylesToOpenXml (definitions: TableStyleDefinition list) : Wordprocessing.Style list =
+        definitions
+        |> List.map (fun d ->
+            let s = Wordprocessing.Style(Type = EnumValue Wordprocessing.StyleValues.Table, StyleId = StringValue d.Id)
+            s.StyleName <- Wordprocessing.StyleName(Val = StringValue d.Name)
+            d.BasedOn |> Option.iter (fun b -> s.BasedOn <- Wordprocessing.BasedOn(Val = StringValue b))
+
+            d.Borders
+            |> Option.iter (fun b ->
+                let stp = Wordprocessing.StyleTableProperties()
+                stp.TableBorders <- tableBordersToOpenXml b
+                s.StyleTableProperties <- stp)
+
+            [ Wordprocessing.TableStyleOverrideValues.WholeTable, d.WholeTable
+              Wordprocessing.TableStyleOverrideValues.FirstRow, d.FirstRow
+              Wordprocessing.TableStyleOverrideValues.Band1Horizontal, d.BandedRow ]
+            |> List.iter (fun (kind, region) -> tableStyleRegionToOpenXml kind region |> Option.iter (fun tsp -> s.AppendChild(tsp) |> ignore))
+
+            s)
+
+    /// The inverse of `tableStylesToOpenXml` - only `w:type="table"` entries, see
+    /// `stylesOfOpenXml`'s own note on why the two functions each filter to their own kind.
+    let tableStylesOfOpenXml (styles: Wordprocessing.Styles option) : TableStyleDefinition list =
+        match styles with
+        | None -> []
+        | Some styles ->
+            styles.Elements<Wordprocessing.Style>()
+            |> Seq.filter (fun s -> not (isNull s.Type) && s.Type.Value = Wordprocessing.StyleValues.Table)
+            |> Seq.map (fun s ->
+                let regionOf (kind: Wordprocessing.TableStyleOverrideValues) =
+                    s.Elements<Wordprocessing.TableStyleProperties>()
+                    |> Seq.tryFind (fun t -> not (isNull t.Type) && t.Type.Value = kind)
+                    |> Option.map tableStyleRegionOfOpenXml
+                    |> Option.defaultValue TableStyleRegion.None
+
+                { Id = s.StyleId.Value
+                  Name = (if isNull s.StyleName then s.StyleId.Value else s.StyleName.Val.Value)
+                  BasedOn = (if isNull s.BasedOn then None else s.BasedOn.Val |> Option.ofObj |> Option.map (fun v -> v.Value))
+                  Borders =
+                    s.StyleTableProperties
+                    |> Option.ofObj
+                    |> Option.bind (fun stp -> stp.TableBorders |> Option.ofObj)
+                    |> Option.map tableBordersOfOpenXml
+                  WholeTable = regionOf Wordprocessing.TableStyleOverrideValues.WholeTable
+                  FirstRow = regionOf Wordprocessing.TableStyleOverrideValues.FirstRow
+                  BandedRow = regionOf Wordprocessing.TableStyleOverrideValues.Band1Horizontal })
             |> List.ofSeq

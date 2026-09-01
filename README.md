@@ -35,8 +35,9 @@ reasoning and what adding either would look like.
   - `Styles.fs` - character and paragraph formatting: `Color`, `HighlightColor` (Word's own
     fixed highlight palette), `UnderlineStyle`, `RunStyle` (including small caps/all
     caps/hidden text), `ParagraphAlignment`, `Indentation`, `LineSpacingRule`,
-    `ParagraphFormat` (including paragraph borders and shading), `BorderLineStyle`,
-    `BorderSide`, `BorderStyle` (reused for both paragraph and table borders).
+    `TabStopAlignment`/`TabLeader`/`TabStop`, `ParagraphFormat` (including paragraph
+    borders, shading, and custom tab stops), `BorderLineStyle`, `BorderSide`,
+    `BorderStyle` (reused for both paragraph and table borders).
   - `NamedStyles.fs` - `StyleDefinition` (paragraph or character, with `BasedOn`
     inheritance) and a small `BuiltInStyles` catalog (`normal`, `heading1`/`2`/`3`,
     `title`, `listParagraph`, `hyperlinkCharStyle`).
@@ -46,17 +47,20 @@ reasoning and what adding either would look like.
   - `Protection.fs` - `EditRestriction` and `DocumentProtection`, document-level (Word has
     no per-section equivalent of Excel's per-sheet protection).
   - `PageSetup.fs` - `PageOrientation`, `PageSize`, `PageMargins`, `SectionBreakType`.
-  - `Tables.fs` - `TableBorders`, `VerticalMergeKind`, `TableCellProps`, `TableStyleRef`.
+  - `Tables.fs` - `TableBorders`, `VerticalMergeKind`, `TableCellProps`, `TableStyleRef`,
+    `TableStyleRegion`/`TableStyleDefinition` (custom table style definitions), and
+    `CellMargins` (a table's default cell margins).
   - `Images.fs` - `ImageFormat`, `ImageEntry` (raw file bytes plus an on-page size),
     anchored inline within a run.
   - `DocumentProperties.fs` - `DocumentProperties` (Title, Author, Subject, Keywords,
     Comments, Category, Company) - core document metadata, `Document.Properties`.
   - `Model.fs` - the recursive content model: `Inline` (runs, breaks, images, hyperlinks,
     bookmarks, comments, simple fields, footnotes/endnotes), `Paragraph`, `Block`
-    (paragraph or table), `TableCell`/`TableRow`/`TableEntry`, `HeaderFooterSet`,
-    `SectionProperties` (including `BreakType`), `Section`, `Document` (including
-    `Document.VbaProject`, a macro-enabled document's raw `vbaProject.bin` bytes, and
-    `Document.Properties`).
+    (paragraph or table), `TableCell`/`TableRow` (including `RepeatAsHeader`)/`TableEntry`
+    (including `CellMargins`), `HeaderFooterSet`, `SectionProperties` (including
+    `BreakType`), `Section`, `Document` (including `Document.VbaProject`, a macro-enabled
+    document's raw `vbaProject.bin` bytes, `Document.Properties`, and
+    `Document.TableStyles`).
   - `Xml.fs` / `Xml.xsd` - the XML surface: `Xml.toDocument`/`Xml.ofDocument` translate a
     `Document` to/from an `XElement` tree, and `Xml.schemaSet()` loads the paired schema
     (embedded in the assembly as a resource) for validating either direction. See
@@ -66,9 +70,10 @@ reasoning and what adding either would look like.
     validation is test-suite only, not a public API. See ["## JSON"](#json) below.
   - `Builders.fs` - plain functional constructors (`section`, `document`, `withStyles`,
     `withNumbering`, `withProtection`, `withVbaProject`, `withDocumentProperties`,
-    `bulletListDef`, `numberedListDef`) plus `DocumentDsl` - smart constructors (`run`,
-    `para`, `hyperlink`, `bookmark`, `comment`, `image`, `footnote`, `endnote`,
-    `tableCell`, `tableRow`, `table`) with real optional parameters, the Word analog of the
+    `withTableStyles`, `bulletListDef`, `numberedListDef`) plus `DocumentDsl` - smart
+    constructors (`run`, `para`, `hyperlink`, `bookmark`, `comment`, `image`, `footnote`,
+    `endnote`, `tableCell`, `tableRow` (with `height`/`repeatAsHeader`), `table` (with
+    `style`/`borders`/`cellMargins`)) with real optional parameters, the Word analog of the
     Excel repo's `SheetDsl`.
   - `Interpreter/StyleRegistry.fs` - shared run/paragraph/border/color conversions plus
     `Document.Styles` <-> `styles.xml` (internal).
@@ -144,6 +149,15 @@ para
             Shading = Some(Rgb(0xD9uy, 0xD9uy, 0xD9uy)) })
 ```
 
+Custom tab stops (`TabStop`) sit on `ParagraphFormat.TabStops` - a right-aligned stop with a
+dot leader is the classic table-of-contents pattern:
+
+```fsharp
+para
+    ([ run "Introduction"; Tab; run "1" ], format =
+        { ParagraphFormat.Default with TabStops = [ { Position = 288.0; Alignment = RightTab; Leader = DotLeader } ] })
+```
+
 Lists use a `(numId, level)` reference on the paragraph, resolved against a
 `NumberingDefinition` attached to the document:
 
@@ -172,6 +186,35 @@ independent and combine on the same cell, matching real Word:
 
 ```fsharp
 tableCell ([ para [ run "Spans 2 columns" ] ], props = { TableCellProps.Default with GridSpan = Some 2 })
+```
+
+A custom table style (`TableStyleDefinition`) lives in `Document.TableStyles` and is applied
+by name, the same way a built-in like `"TableGrid"` is - here with a bold white header row on
+a blue background, plus a table-wide default cell margin and a row that repeats on every page:
+
+```fsharp
+let corporateStyle: TableStyleDefinition =
+    { Id = "Corporate"
+      Name = "Corporate"
+      BasedOn = None
+      Borders = None
+      WholeTable = TableStyleRegion.None
+      FirstRow =
+        { TableStyleRegion.None with
+            RunFormat = Some { RunStyle.Default with Bold = true; Color = Some Color.white }
+            CellShading = Some(Rgb(0x4Fuy, 0x81uy, 0xBDuy)) }
+      BandedRow = { TableStyleRegion.None with CellShading = Some(Rgb(0xDCuy, 0xE6uy, 0xF1uy)) } }
+
+document
+    [ section
+          [ table (
+                [ tableRow ([ tableCell [ para [ run "Item" ] ]; tableCell [ para [ run "Qty" ] ] ], repeatAsHeader = true)
+                  tableRow [ tableCell [ para [ run "Widgets" ] ]; tableCell [ para [ run "12" ] ] ] ],
+                [ 200.0; 100.0 ],
+                style = { TableStyleRef.Default with Name = "Corporate" },
+                cellMargins = { Top = Some 4.0; Bottom = Some 4.0; Left = Some 6.0; Right = Some 6.0 }
+            ) ] ]
+|> withTableStyles [ corporateStyle ]
 ```
 
 Sections carry their own page setup - a document is a sequence of `Section`s, mapping 1:1

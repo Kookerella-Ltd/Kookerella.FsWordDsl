@@ -215,6 +215,51 @@ module Xml =
           Top = el.Element(xn "top") |> Option.ofObj |> Option.map borderSideOfXml
           Bottom = el.Element(xn "bottom") |> Option.ofObj |> Option.map borderSideOfXml }
 
+    let private tabAlignToStr (a: TabStopAlignment) : string =
+        match a with
+        | LeftTab -> "left"
+        | CenterTab -> "center"
+        | RightTab -> "right"
+        | DecimalTab -> "decimal"
+        | BarTab -> "bar"
+        | OtherTabAlignment raw -> "other:" + raw
+
+    let private tabAlignOfStr (s: string) : TabStopAlignment =
+        match s with
+        | "left" -> LeftTab
+        | "center" -> CenterTab
+        | "right" -> RightTab
+        | "decimal" -> DecimalTab
+        | "bar" -> BarTab
+        | other when other.StartsWith("other:") -> OtherTabAlignment(other.Substring(6))
+        | other -> OtherTabAlignment other
+
+    let private tabLeaderToStr (l: TabLeader) : string =
+        match l with
+        | NoLeader -> "none"
+        | DotLeader -> "dot"
+        | HyphenLeader -> "hyphen"
+        | UnderscoreLeader -> "underscore"
+        | HeavyLeader -> "heavy"
+        | MiddleDotLeader -> "middleDot"
+
+    let private tabLeaderOfStr (s: string) : TabLeader =
+        match s with
+        | "dot" -> DotLeader
+        | "hyphen" -> HyphenLeader
+        | "underscore" -> UnderscoreLeader
+        | "heavy" -> HeavyLeader
+        | "middleDot" -> MiddleDotLeader
+        | _ -> NoLeader
+
+    let private tabStopToXml (t: TabStop) : XElement =
+        XElement(xn "tab", attr "position" t.Position, attr "alignment" (tabAlignToStr t.Alignment), attrOpt "leader" (if t.Leader = NoLeader then None else Some(tabLeaderToStr t.Leader)))
+
+    let private tabStopOfXml (el: XElement) : TabStop =
+        { Position = float (el.Attribute(xn "position").Value)
+          Alignment = tabAlignOfStr (el.Attribute(xn "alignment").Value)
+          Leader = strAttr "leader" el |> Option.map tabLeaderOfStr |> Option.defaultValue NoLeader }
+
     let private paragraphFormatToXml (f: ParagraphFormat) : XElement =
         XElement(
             xn "paragraphFormat",
@@ -226,7 +271,8 @@ module Xml =
             attrOpt "shading" (f.Shading |> Option.map colorToStr),
             (f.LineSpacing |> Option.map lineSpacingToXml |> Option.toList),
             (f.Indentation |> Option.map indentationToXml |> Option.toList),
-            (f.Borders |> Option.map (fun b -> XElement(xn "borders", borderStyleChildren b)) |> Option.toList)
+            (f.Borders |> Option.map (fun b -> XElement(xn "borders", borderStyleChildren b)) |> Option.toList),
+            (if f.TabStops.IsEmpty then [] else [ XElement(xn "tabs", f.TabStops |> List.map tabStopToXml) ])
         )
 
     let private paragraphFormatOfXml (el: XElement) : ParagraphFormat =
@@ -238,7 +284,8 @@ module Xml =
           KeepWithNext = boolAttr "keepWithNext" el
           PageBreakBefore = boolAttr "pageBreakBefore" el
           Shading = strAttr "shading" el |> Option.map colorOfStr
-          Borders = el.Element(xn "borders") |> Option.ofObj |> Option.map borderStyleOfXml }
+          Borders = el.Element(xn "borders") |> Option.ofObj |> Option.map borderStyleOfXml
+          TabStops = el.Element(xn "tabs") |> Option.ofObj |> Option.map (fun t -> t.Elements(xn "tab") |> Seq.map tabStopOfXml |> List.ofSeq) |> Option.defaultValue [] }
 
     // --- Borders --------------------------------------------------------------------------
 
@@ -307,6 +354,15 @@ module Xml =
           LastRowBanding = boolAttr "lastRow" el
           BandedRows = boolAttr "bandedRows" el
           BandedColumns = boolAttr "bandedColumns" el }
+
+    let private cellMarginsToXml (m: CellMargins) : XElement =
+        XElement(xn "cellMargins", attrOpt "top" m.Top, attrOpt "bottom" m.Bottom, attrOpt "left" m.Left, attrOpt "right" m.Right)
+
+    let private cellMarginsOfXml (el: XElement) : CellMargins =
+        { Top = strAttr "top" el |> Option.map float
+          Bottom = strAttr "bottom" el |> Option.map float
+          Left = strAttr "left" el |> Option.map float
+          Right = strAttr "right" el |> Option.map float }
 
     let private tableCellPropsToXml (p: TableCellProps) : XElement =
         XElement(
@@ -413,17 +469,25 @@ module Xml =
         { Content = el.Elements() |> Seq.filter (fun c -> c.Name.LocalName <> "cellProps") |> Seq.map blockOfXml |> List.ofSeq
           Props = el.Element(xn "cellProps") |> Option.ofObj |> Option.map tableCellPropsOfXml |> Option.defaultValue TableCellProps.Default }
 
-    and private tableRowToXml (r: TableRow) : XElement = XElement(xn "row", attrOpt "height" r.Height, r.Cells |> List.map tableCellToXml)
+    and private tableRowToXml (r: TableRow) : XElement =
+        XElement(
+            xn "row",
+            attrOpt "height" r.Height,
+            (if r.RepeatAsHeader then [ attr "repeatAsHeader" true ] else []),
+            r.Cells |> List.map tableCellToXml
+        )
 
     and private tableRowOfXml (el: XElement) : TableRow =
         { Cells = el.Elements(xn "cell") |> Seq.map tableCellOfXml |> List.ofSeq
-          Height = strAttr "height" el |> Option.map float }
+          Height = strAttr "height" el |> Option.map float
+          RepeatAsHeader = boolAttr "repeatAsHeader" el }
 
     and private tableToXml (t: TableEntry) : XElement =
         XElement(
             xn "table",
             (t.Style |> Option.map tableStyleRefToXml |> Option.toList),
             (t.Borders |> Option.map tableBordersToXml |> Option.toList),
+            (t.CellMargins |> Option.map cellMarginsToXml |> Option.toList),
             XElement(xn "columnWidths", t.ColumnWidths |> List.map (fun w -> XElement(xn "col", attr "width" w))),
             XElement(xn "rows", t.Rows |> List.map tableRowToXml)
         )
@@ -432,7 +496,8 @@ module Xml =
         { Rows = el.Element(xn "rows").Elements(xn "row") |> Seq.map tableRowOfXml |> List.ofSeq
           ColumnWidths = el.Element(xn "columnWidths").Elements(xn "col") |> Seq.map (fun c -> float (c.Attribute(xn "width").Value)) |> List.ofSeq
           Style = el.Element(xn "tableStyle") |> Option.ofObj |> Option.map tableStyleRefOfXml
-          Borders = el.Element(xn "tableBorders") |> Option.ofObj |> Option.map tableBordersOfXml }
+          Borders = el.Element(xn "tableBorders") |> Option.ofObj |> Option.map tableBordersOfXml
+          CellMargins = el.Element(xn "cellMargins") |> Option.ofObj |> Option.map cellMarginsOfXml }
 
     // --- Page setup / headers & footers -------------------------------------------------------
 
@@ -578,6 +643,43 @@ module Xml =
 
         { Edit = edit; Password = strAttr "password" el }
 
+    let private tableStyleRegionToXml (name: string) (r: TableStyleRegion) : XElement list =
+        if r = TableStyleRegion.None then
+            []
+        else
+            [ XElement(
+                  xn name,
+                  attrOpt "cellShading" (r.CellShading |> Option.map colorToStr),
+                  (r.RunFormat |> Option.map runStyleToXml |> Option.toList),
+                  (r.ParaFormat |> Option.map paragraphFormatToXml |> Option.toList)
+              ) ]
+
+    let private tableStyleRegionOfXml (el: XElement) : TableStyleRegion =
+        { RunFormat = el.Element(xn "runStyle") |> Option.ofObj |> Option.map runStyleOfXml
+          ParaFormat = el.Element(xn "paragraphFormat") |> Option.ofObj |> Option.map paragraphFormatOfXml
+          CellShading = strAttr "cellShading" el |> Option.map colorOfStr }
+
+    let private tableStyleDefinitionToXml (d: TableStyleDefinition) : XElement =
+        XElement(
+            xn "tableStyleDef",
+            attr "id" d.Id,
+            attr "name" d.Name,
+            attrOpt "basedOn" d.BasedOn,
+            (d.Borders |> Option.map tableBordersToXml |> Option.toList),
+            tableStyleRegionToXml "wholeTable" d.WholeTable,
+            tableStyleRegionToXml "firstRow" d.FirstRow,
+            tableStyleRegionToXml "bandedRow" d.BandedRow
+        )
+
+    let private tableStyleDefinitionOfXml (el: XElement) : TableStyleDefinition =
+        { Id = el.Attribute(xn "id").Value
+          Name = el.Attribute(xn "name").Value
+          BasedOn = strAttr "basedOn" el
+          Borders = el.Element(xn "tableBorders") |> Option.ofObj |> Option.map tableBordersOfXml
+          WholeTable = el.Element(xn "wholeTable") |> Option.ofObj |> Option.map tableStyleRegionOfXml |> Option.defaultValue TableStyleRegion.None
+          FirstRow = el.Element(xn "firstRow") |> Option.ofObj |> Option.map tableStyleRegionOfXml |> Option.defaultValue TableStyleRegion.None
+          BandedRow = el.Element(xn "bandedRow") |> Option.ofObj |> Option.map tableStyleRegionOfXml |> Option.defaultValue TableStyleRegion.None }
+
     // --- Top level ------------------------------------------------------------------------
 
     let private documentPropertiesToXml (p: DocumentProperties) : XElement =
@@ -611,7 +713,8 @@ module Xml =
             (if doc.Numbering.IsEmpty then [] else [ XElement(xn "numbering", doc.Numbering |> List.map numberingDefinitionToXml) ]),
             (doc.Protection |> Option.map protectionToXml |> Option.toList),
             (doc.VbaProject |> Option.map (fun b -> XElement(xn "vbaProject", Convert.ToBase64String(b))) |> Option.toList),
-            (if doc.Properties = DocumentProperties.Default then [] else [ documentPropertiesToXml doc.Properties ])
+            (if doc.Properties = DocumentProperties.Default then [] else [ documentPropertiesToXml doc.Properties ]),
+            (if doc.TableStyles.IsEmpty then [] else [ XElement(xn "tableStyles", doc.TableStyles |> List.map tableStyleDefinitionToXml) ])
         )
 
     /// `XElement` -> `Document`, the inverse of `toDocument`.
@@ -621,7 +724,12 @@ module Xml =
           Numbering = el.Element(xn "numbering") |> Option.ofObj |> Option.map (fun e -> e.Elements(xn "numberingDef") |> Seq.map numberingDefinitionOfXml |> List.ofSeq) |> Option.defaultValue []
           Protection = el.Element(xn "protection") |> Option.ofObj |> Option.map protectionOfXml
           VbaProject = el.Element(xn "vbaProject") |> Option.ofObj |> Option.map (fun e -> Convert.FromBase64String(e.Value))
-          Properties = el.Element(xn "properties") |> Option.ofObj |> Option.map documentPropertiesOfXml |> Option.defaultValue DocumentProperties.Default }
+          Properties = el.Element(xn "properties") |> Option.ofObj |> Option.map documentPropertiesOfXml |> Option.defaultValue DocumentProperties.Default
+          TableStyles =
+            el.Element(xn "tableStyles")
+            |> Option.ofObj
+            |> Option.map (fun e -> e.Elements(xn "tableStyleDef") |> Seq.map tableStyleDefinitionOfXml |> List.ofSeq)
+            |> Option.defaultValue [] }
 
     /// Loads the embedded schema for validating either direction yourself
     /// (`XDocument.Validate`).

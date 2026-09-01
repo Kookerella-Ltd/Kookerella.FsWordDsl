@@ -302,12 +302,16 @@ module Reader =
         let rows =
             t.Elements<Wordprocessing.TableRow>()
             |> Seq.map (fun tr ->
+                let trPr = tr.GetFirstChild<Wordprocessing.TableRowProperties>() |> opt
+
                 let height =
-                    tr.GetFirstChild<Wordprocessing.TableRowProperties>()
-                    |> opt
+                    trPr
                     |> Option.bind (fun p -> p.GetFirstChild<Wordprocessing.TableRowHeight>() |> opt)
                     |> Option.bind (fun h -> h.Val |> opt)
                     |> Option.map (fun v -> twipsToPoints (string v.Value))
+
+                let repeatAsHeader =
+                    trPr |> Option.bind (fun p -> p.GetFirstChild<Wordprocessing.TableHeader>() |> opt) |> Option.isSome
 
                 let cells =
                     tr.Elements<Wordprocessing.TableCell>()
@@ -350,13 +354,23 @@ module Reader =
                         { Content = content; Props = props })
                     |> List.ofSeq
 
-                { Cells = cells; Height = height })
+                { Cells = cells; Height = height; RepeatAsHeader = repeatAsHeader })
             |> List.ofSeq
+
+        let cellMargins =
+            tblPr
+            |> Option.bind (fun p -> p.TableCellMarginDefault |> opt)
+            |> Option.map (fun m ->
+                { Top = m.TopMargin |> opt |> Option.bind (fun v -> v.Width |> opt) |> Option.map (fun v -> twipsToPoints v.Value)
+                  Bottom = m.BottomMargin |> opt |> Option.bind (fun v -> v.Width |> opt) |> Option.map (fun v -> twipsToPoints v.Value)
+                  Left = m.TableCellLeftMargin |> opt |> Option.bind (fun v -> v.Width |> opt) |> Option.map (fun v -> twipsToPoints (string v.Value))
+                  Right = m.TableCellRightMargin |> opt |> Option.bind (fun v -> v.Width |> opt) |> Option.map (fun v -> twipsToPoints (string v.Value)) })
 
         { Rows = rows
           ColumnWidths = widths
           Style = tableStyleRefOfW tblPr
-          Borders = tableBordersOfW tblPr }
+          Borders = tableBordersOfW tblPr
+          CellMargins = cellMargins }
 
     /// The inverse of `Writer.insertNoteMarker` - strips the note-reference-mark run
     /// (`w:footnoteRef`/`w:endnoteRef`) back out of the body's first paragraph before
@@ -585,7 +599,9 @@ module Reader =
               FootnotesById = footnotesById
               EndnotesById = endnotesById }
 
-        let styles = stylesOfOpenXml (mainPart.StyleDefinitionsPart |> opt |> Option.bind (fun p -> p.Styles |> opt))
+        let stylesXml = mainPart.StyleDefinitionsPart |> opt |> Option.bind (fun p -> p.Styles |> opt)
+        let styles = stylesOfOpenXml stylesXml
+        let tableStyles = tableStylesOfOpenXml stylesXml
         let numbering = numberingOfW (mainPart.NumberingDefinitionsPart |> opt |> Option.bind (fun p -> p.Numbering |> opt))
         let protection = documentProtectionOfW (mainPart.DocumentSettingsPart |> opt |> Option.bind (fun p -> p.Settings |> opt))
 
@@ -619,7 +635,8 @@ module Reader =
           Numbering = numbering
           Protection = protection
           VbaProject = vbaProject
-          Properties = properties }
+          Properties = properties
+          TableStyles = tableStyles }
 
     let loadFromFile (path: string) : Document =
         use wordDoc = WordprocessingDocument.Open(path, false)

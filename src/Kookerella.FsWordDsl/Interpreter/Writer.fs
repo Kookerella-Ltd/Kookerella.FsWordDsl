@@ -331,6 +331,14 @@ module Writer =
 
         tc
 
+    and private cellMarginsToW (m: CellMargins) : Wordprocessing.TableCellMarginDefault =
+        let tcMar = Wordprocessing.TableCellMarginDefault()
+        m.Top |> Option.iter (fun v -> tcMar.TopMargin <- Wordprocessing.TopMargin(Width = StringValue(string (pointsToTwips v)), Type = EnumValue Wordprocessing.TableWidthUnitValues.Dxa))
+        m.Bottom |> Option.iter (fun v -> tcMar.BottomMargin <- Wordprocessing.BottomMargin(Width = StringValue(string (pointsToTwips v)), Type = EnumValue Wordprocessing.TableWidthUnitValues.Dxa))
+        m.Left |> Option.iter (fun v -> tcMar.TableCellLeftMargin <- Wordprocessing.TableCellLeftMargin(Width = Int16Value(int16 (pointsToTwips v)), Type = EnumValue Wordprocessing.TableWidthValues.Dxa))
+        m.Right |> Option.iter (fun v -> tcMar.TableCellRightMargin <- Wordprocessing.TableCellRightMargin(Width = Int16Value(int16 (pointsToTwips v)), Type = EnumValue Wordprocessing.TableWidthValues.Dxa))
+        tcMar
+
     and private tableEntryToW (ctx: Ctx) (t: TableEntry) : Wordprocessing.Table =
         let table = Wordprocessing.Table()
         let tblPr = Wordprocessing.TableProperties()
@@ -347,6 +355,7 @@ module Writer =
             tblPr.TableLook <- look)
 
         t.Borders |> Option.iter (fun b -> tblPr.TableBorders <- tableBordersToW b)
+        t.CellMargins |> Option.iter (fun m -> tblPr.TableCellMarginDefault <- cellMarginsToW m)
         table.AppendChild(tblPr) |> ignore
 
         let widthsTwips = t.ColumnWidths |> List.map pointsToTwips
@@ -356,7 +365,15 @@ module Writer =
         t.Rows
         |> List.iter (fun row ->
             let tr = Wordprocessing.TableRow()
-            row.Height |> Option.iter (fun h -> tr.AppendChild(Wordprocessing.TableRowProperties(Wordprocessing.TableRowHeight(Val = UInt32Value(pointsToTwipsU h)))) |> ignore)
+
+            if row.Height.IsSome || row.RepeatAsHeader then
+                let trPr = Wordprocessing.TableRowProperties()
+                row.Height |> Option.iter (fun h -> trPr.AppendChild(Wordprocessing.TableRowHeight(Val = UInt32Value(pointsToTwipsU h))) |> ignore)
+
+                if row.RepeatAsHeader then
+                    trPr.AppendChild(Wordprocessing.TableHeader()) |> ignore
+
+                tr.AppendChild(trPr) |> ignore
 
             row.Cells
             |> List.iteri (fun i cell ->
@@ -570,6 +587,7 @@ module Writer =
 
         let stylesPart = mainPart.AddNewPart<StyleDefinitionsPart>()
         stylesPart.Styles <- stylesToOpenXml doc.Styles
+        tableStylesToOpenXml doc.TableStyles |> List.iter (fun s -> stylesPart.Styles.AppendChild(s) |> ignore)
 
         if not doc.Numbering.IsEmpty then
             let numberingPart = mainPart.AddNewPart<NumberingDefinitionsPart>()

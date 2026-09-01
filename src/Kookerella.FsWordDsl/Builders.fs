@@ -26,7 +26,8 @@ module Builders =
           Numbering = []
           Protection = None
           VbaProject = None
-          Properties = DocumentProperties.Default }
+          Properties = DocumentProperties.Default
+          TableStyles = [] }
 
     /// Pipe-friendly, mirroring Excel's own `withDefinedNames`/`withProtection`.
     let withStyles (styles: StyleDefinition list) (doc: Document) : Document = { doc with Styles = styles }
@@ -36,6 +37,9 @@ module Builders =
     let withDocumentProperties (properties: DocumentProperties) (doc: Document) : Document = { doc with Properties = properties }
 
     let withNumbering (definitions: NumberingDefinition list) (doc: Document) : Document = { doc with Numbering = definitions }
+
+    /// Pipe-friendly, mirroring `withStyles` - see `TableStyleDefinition`'s own doc comment.
+    let withTableStyles (definitions: TableStyleDefinition list) (doc: Document) : Document = { doc with TableStyles = definitions }
 
     let withProtection (protection: DocumentProtection) (doc: Document) : Document = { doc with Protection = Some protection }
 
@@ -129,17 +133,22 @@ type DocumentDsl =
         { Content = content
           Props = defaultArg props TableCellProps.Default }
 
-    static member tableRow(cells: TableCell list, ?height: float) : TableRow = { Cells = cells; Height = height }
+    static member tableRow(cells: TableCell list, ?height: float, ?repeatAsHeader: bool) : TableRow =
+        { Cells = cells
+          Height = height
+          RepeatAsHeader = defaultArg repeatAsHeader false }
 
     static member table
         (
             rows: TableRow list,
             columnWidths: float list,
             ?style: TableStyleRef,
-            ?borders: TableBorders
+            ?borders: TableBorders,
+            ?cellMargins: CellMargins
         ) : Block =
         TableBlock
             { Rows = rows
               ColumnWidths = columnWidths
               Style = style
-              Borders = borders }
+              Borders = borders
+              CellMargins = cellMargins }

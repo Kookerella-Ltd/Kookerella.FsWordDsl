@@ -174,6 +174,37 @@ module Styles =
               Top = None
               Bottom = None }
 
+    /// How text lines up against a custom tab stop (`w:tab/@w:val`). `OtherTabAlignment`
+    /// preserves any other raw OOXML value (e.g. `"start"`/`"end"`, the bidi-aware aliases
+    /// for `Left`/`Right`, or `"num"`) so reading and re-writing an existing document
+    /// round-trips even for a kind this DSL doesn't author itself - same escape-hatch
+    /// convention as `BorderLineStyle.Other`.
+    type TabStopAlignment =
+        | LeftTab
+        | CenterTab
+        | RightTab
+        | DecimalTab
+        | BarTab
+        | OtherTabAlignment of string
+
+    /// The dotted/dashed/etc. fill Word draws between the previous text and a tab stop
+    /// (`w:tab/@w:leader`) - most commonly seen leading up to a right-aligned page number in
+    /// a table of contents.
+    type TabLeader =
+        | NoLeader
+        | DotLeader
+        | HyphenLeader
+        | UnderscoreLeader
+        | HeavyLeader
+        | MiddleDotLeader
+
+    /// One custom tab stop (`w:tab`). `Position` is in points, measured from the left
+    /// margin (matching every other position field in this module).
+    type TabStop =
+        { Position: float
+          Alignment: TabStopAlignment
+          Leader: TabLeader }
+
     /// Direct/inline paragraph formatting - written straight onto the paragraph's own
     /// `w:pPr`. `StyleId` (on `Paragraph` itself, not here) supplies the named-style layer;
     /// this record is the override/direct-formatting layer on top of it, same relationship
@@ -191,7 +222,12 @@ module Styles =
           Borders: BorderStyle option
           /// Background fill behind the paragraph's text (`w:shd`) - same `Color` type
           /// `Tables.TableCellProps.Shading` uses for a table cell's own background.
-          Shading: Color option }
+          Shading: Color option
+          /// Custom tab stops (`w:tabs`) - an empty list means "no custom tabs", not
+          /// "clear Word's own default tab stops every half-inch" (this DSL doesn't author
+          /// `w:val="clear"` entries, which exist only to override an inherited style's
+          /// tab stops).
+          TabStops: TabStop list }
 
         static member Default =
             { Alignment = None
@@ -202,4 +238,5 @@ module Styles =
               KeepWithNext = false
               PageBreakBefore = false
               Borders = None
-              Shading = None }
+              Shading = None
+              TabStops = [] }

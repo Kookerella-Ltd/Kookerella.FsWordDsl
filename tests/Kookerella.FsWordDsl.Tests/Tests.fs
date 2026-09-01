@@ -69,6 +69,7 @@ let private verifyScenarioNamed (name: string) (fileName: string) (doc: Document
     Assert.Equal<byte[] option>(doc.VbaProject, roundTripped.VbaProject)
 
     Assert.Equal<DocumentProperties>(doc.Properties, roundTripped.Properties)
+    Assert.Equal<TableStyleDefinition list>(doc.TableStyles, roundTripped.TableStyles)
 
     let script = Document.generateScript codeGenReferenceLines fileName doc
     File.WriteAllText(Path.Combine(dir, "script.fsx"), script)
@@ -148,12 +149,18 @@ let ``ParagraphFormatting`` () =
                         Bottom = Some { Style = SingleLine; Width = Some 1.0; Color = Some Color.black } }
             Shading = Some(Rgb(0xD9uy, 0xD9uy, 0xD9uy)) }
 
+    let tabbed =
+        { ParagraphFormat.Default with
+            TabStops =
+                [ { Position = 288.0; Alignment = RightTab; Leader = DotLeader } ] }
+
     let doc =
         document
             [ section
                   [ para ([ run "Centered heading-like text." ], format = centered)
                     para ([ run "An indented, double-spaced paragraph." ], format = indented)
-                    para ([ run "A paragraph with top/bottom borders and shading." ], format = bordered) ] ]
+                    para ([ run "A paragraph with top/bottom borders and shading." ], format = bordered)
+                    para ([ run "Introduction"; Tab; run "1" ], format = tabbed) ] ]
 
     verifyScenarioNamed "ParagraphFormatting" "output.docx" doc
 
@@ -422,6 +429,43 @@ let ``DocumentProperties`` () =
 
     verifyScenarioNamed "DocumentProperties" "output.docx" doc
 
+[<Fact>]
+let ``Table_CustomStyleAndHeaderRow`` () =
+    let thin: BorderSide = { Style = SingleLine; Width = Some 0.5; Color = Some Color.black }
+
+    let customStyle: TableStyleDefinition =
+        { Id = "MyTableStyle"
+          Name = "My Table Style"
+          BasedOn = None
+          Borders =
+            Some
+                { Outer = { Left = Some thin; Right = Some thin; Top = Some thin; Bottom = Some thin }
+                  InsideHorizontal = Some thin
+                  InsideVertical = Some thin }
+          WholeTable = TableStyleRegion.None
+          FirstRow =
+            { TableStyleRegion.None with
+                RunFormat = Some { RunStyle.Default with Bold = true; Color = Some Color.white }
+                CellShading = Some(Rgb(0x4Fuy, 0x81uy, 0xBDuy)) }
+          BandedRow = { TableStyleRegion.None with CellShading = Some(Rgb(0xDCuy, 0xE6uy, 0xF1uy)) } }
+
+    let cell (text: string) (width: float) = tableCell ([ para [ run text ] ], props = { TableCellProps.Default with Width = Some width })
+
+    let doc =
+        document
+            [ section
+                  [ table (
+                        [ tableRow ([ cell "Name" 200.0; cell "Amount" 150.0 ], height = 20.0, repeatAsHeader = true)
+                          tableRow [ cell "Widgets" 200.0; cell "12" 150.0 ]
+                          tableRow [ cell "Gadgets" 200.0; cell "7" 150.0 ] ],
+                        [ 200.0; 150.0 ],
+                        style = { TableStyleRef.Default with Name = "MyTableStyle" },
+                        cellMargins = { Top = Some 4.0; Bottom = Some 4.0; Left = Some 6.0; Right = Some 6.0 }
+                    ) ] ]
+        |> withTableStyles [ customStyle ]
+
+    verifyScenarioNamed "Table_CustomStyleAndHeaderRow" "output.docx" doc
+
 // --- Slow: actually execute every generated script.fsx and verify it reproduces the
 // committed example ------------------------------------------------------------------
 
@@ -448,6 +492,7 @@ let ``DocumentProperties`` () =
 [<InlineData("DocumentProtectionReadOnly")>]
 [<InlineData("Macro")>]
 [<InlineData("DocumentProperties")>]
+[<InlineData("Table_CustomStyleAndHeaderRow")>]
 let ``Regenerated script reproduces the example`` (name: string) =
     let dir = Path.Combine(examplesDir, name)
     let scriptPath = Path.Combine(dir, "script.fsx")

@@ -91,7 +91,11 @@ module Model =
     and TableRow =
         { Cells: TableCell list
           /// Points.
-          Height: float option }
+          Height: float option
+          /// Repeats this row at the top of every page the table spans (`w:trPr/
+          /// w:tblHeader`) - meaningful only on a table's leading row(s); real Word ignores
+          /// it on a row that isn't part of a contiguous run starting at row 1.
+          RepeatAsHeader: bool }
 
     /// `ColumnWidths` gives the table's own grid (`w:tblGrid`) - one entry per column, in
     /// points; a row's own cells should sum to the same column count accounting for any
@@ -101,7 +105,10 @@ module Model =
         { Rows: TableRow list
           ColumnWidths: float list
           Style: TableStyleRef option
-          Borders: TableBorders option }
+          Borders: TableBorders option
+          /// The table's own default cell margins (`w:tblCellMar`) - see `CellMargins`'s own
+          /// doc comment for what this does and doesn't cover.
+          CellMargins: CellMargins option }
 
     /// `Default`/`First`/`Even` mirror Word's own three header/footer variants exactly -
     /// `First` shows only on a section's first page (requires the sibling
@@ -164,4 +171,8 @@ module Model =
           Protection: DocumentProtection option
           VbaProject: byte[] option
           /// Title/Author/Subject/etc. - see `DocumentProperties`'s own doc comment.
-          Properties: DocumentProperties }
+          Properties: DocumentProperties
+          /// Custom table style *definitions* - see `TableStyleDefinition`'s own doc
+          /// comment. Referenced from a `TableEntry.Style.Name` the same way a built-in
+          /// name like `"TableGrid"` is.
+          TableStyles: TableStyleDefinition list }

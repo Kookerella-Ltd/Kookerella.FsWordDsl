@@ -223,6 +223,57 @@ module Json =
           Top = prop "top" o |> Option.map borderSideOfJson
           Bottom = prop "bottom" o |> Option.map borderSideOfJson }
 
+    let private tabAlignToStr (a: TabStopAlignment) : string =
+        match a with
+        | LeftTab -> "left"
+        | CenterTab -> "center"
+        | RightTab -> "right"
+        | DecimalTab -> "decimal"
+        | BarTab -> "bar"
+        | OtherTabAlignment raw -> "other:" + raw
+
+    let private tabAlignOfStr (s: string) : TabStopAlignment =
+        match s with
+        | "left" -> LeftTab
+        | "center" -> CenterTab
+        | "right" -> RightTab
+        | "decimal" -> DecimalTab
+        | "bar" -> BarTab
+        | other when other.StartsWith("other:") -> OtherTabAlignment(other.Substring(6))
+        | other -> OtherTabAlignment other
+
+    let private tabLeaderToStr (l: TabLeader) : string =
+        match l with
+        | NoLeader -> "none"
+        | DotLeader -> "dot"
+        | HyphenLeader -> "hyphen"
+        | UnderscoreLeader -> "underscore"
+        | HeavyLeader -> "heavy"
+        | MiddleDotLeader -> "middleDot"
+
+    let private tabLeaderOfStr (s: string) : TabLeader =
+        match s with
+        | "dot" -> DotLeader
+        | "hyphen" -> HyphenLeader
+        | "underscore" -> UnderscoreLeader
+        | "heavy" -> HeavyLeader
+        | "middleDot" -> MiddleDotLeader
+        | _ -> NoLeader
+
+    let private tabStopToJson (t: TabStop) : JsonNode =
+        obj_
+            [ "position", Some(jnum t.Position)
+              "alignment", Some(jstr (tabAlignToStr t.Alignment))
+              "leader", (if t.Leader = NoLeader then None else Some(jstr (tabLeaderToStr t.Leader))) ]
+        :> JsonNode
+
+    let private tabStopOfJson (n: JsonNode) : TabStop =
+        let o = n.AsObject()
+
+        { Position = num "position" o |> Option.defaultValue 0.0
+          Alignment = str "alignment" o |> Option.map tabAlignOfStr |> Option.defaultValue LeftTab
+          Leader = str "leader" o |> Option.map tabLeaderOfStr |> Option.defaultValue NoLeader }
+
     let private paragraphFormatToJson (f: ParagraphFormat) : JsonNode =
         obj_
             [ "alignment", f.Alignment |> Option.map (alignToStr >> jstr)
@@ -233,7 +284,8 @@ module Json =
               "keepWithNext", (if f.KeepWithNext then Some(jbool true) else None)
               "pageBreakBefore", (if f.PageBreakBefore then Some(jbool true) else None)
               "shading", f.Shading |> Option.map (colorToStr >> jstr)
-              "borders", f.Borders |> Option.map borderStyleToJson ]
+              "borders", f.Borders |> Option.map borderStyleToJson
+              "tabStops", (if f.TabStops.IsEmpty then None else Some(JsonArray(f.TabStops |> List.map tabStopToJson |> Array.ofList) :> JsonNode)) ]
         :> JsonNode
 
     let private paragraphFormatOfJson (o: JsonObject) : ParagraphFormat =
@@ -245,7 +297,8 @@ module Json =
           KeepWithNext = boolean "keepWithNext" o
           PageBreakBefore = boolean "pageBreakBefore" o
           Shading = str "shading" o |> Option.map colorOfStr
-          Borders = prop "borders" o |> Option.map borderStyleOfJson }
+          Borders = prop "borders" o |> Option.map borderStyleOfJson
+          TabStops = arr "tabStops" o |> List.map tabStopOfJson }
 
     let private tableBordersToJson (b: TableBorders) : JsonNode =
         obj_
@@ -321,6 +374,12 @@ module Json =
           LastRowBanding = boolean "lastRow" o
           BandedRows = boolean "bandedRows" o
           BandedColumns = boolean "bandedColumns" o }
+
+    let private cellMarginsToJson (m: CellMargins) : JsonNode =
+        obj_ [ "top", m.Top |> Option.map jnum; "bottom", m.Bottom |> Option.map jnum; "left", m.Left |> Option.map jnum; "right", m.Right |> Option.map jnum ] :> JsonNode
+
+    let private cellMarginsOfJson (o: JsonObject) : CellMargins =
+        { Top = num "top" o; Bottom = num "bottom" o; Left = num "left" o; Right = num "right" o }
 
     let private tableCellPropsToJson (p: TableCellProps) : JsonNode =
         obj_
@@ -457,16 +516,23 @@ module Json =
           Props = prop "props" o |> Option.map tableCellPropsOfJson |> Option.defaultValue TableCellProps.Default }
 
     and private tableRowToJson (r: TableRow) : JsonNode =
-        obj_ [ "height", r.Height |> Option.map jnum; "cells", Some(JsonArray(r.Cells |> List.map tableCellToJson |> Array.ofList)) ] :> JsonNode
+        obj_
+            [ "height", r.Height |> Option.map jnum
+              "repeatAsHeader", (if r.RepeatAsHeader then Some(jbool true) else None)
+              "cells", Some(JsonArray(r.Cells |> List.map tableCellToJson |> Array.ofList)) ]
+        :> JsonNode
 
     and private tableRowOfJson (n: JsonNode) : TableRow =
         let o = n.AsObject()
-        { Cells = arr "cells" o |> List.map tableCellOfJson; Height = num "height" o }
+        { Cells = arr "cells" o |> List.map tableCellOfJson
+          Height = num "height" o
+          RepeatAsHeader = boolean "repeatAsHeader" o }
 
     and private tableToJson (t: TableEntry) : JsonNode =
         obj_
             [ "style", t.Style |> Option.map tableStyleRefToJson
               "borders", t.Borders |> Option.map tableBordersToJson
+              "cellMargins", t.CellMargins |> Option.map cellMarginsToJson
               "columnWidths", Some(JsonArray(t.ColumnWidths |> List.map jnum |> Array.ofList))
               "rows", Some(JsonArray(t.Rows |> List.map tableRowToJson |> Array.ofList)) ]
         :> JsonNode
@@ -475,7 +541,8 @@ module Json =
         { Rows = arr "rows" o |> List.map tableRowOfJson
           ColumnWidths = arr "columnWidths" o |> List.map (fun n -> n.GetValue<float>())
           Style = prop "style" o |> Option.map tableStyleRefOfJson
-          Borders = prop "borders" o |> Option.map tableBordersOfJson }
+          Borders = prop "borders" o |> Option.map tableBordersOfJson
+          CellMargins = prop "cellMargins" o |> Option.map cellMarginsOfJson }
 
     // --- Page setup / headers & footers -------------------------------------------------------
 
@@ -673,6 +740,45 @@ module Json =
           Category = str "category" o
           Company = str "company" o }
 
+    let private tableStyleRegionToJson (r: TableStyleRegion) : JsonNode option =
+        if r = TableStyleRegion.None then
+            None
+        else
+            Some(
+                obj_
+                    [ "runStyle", r.RunFormat |> Option.map runStyleToJson
+                      "paragraphFormat", r.ParaFormat |> Option.map paragraphFormatToJson
+                      "cellShading", r.CellShading |> Option.map (colorToStr >> jstr) ]
+                :> JsonNode
+            )
+
+    let private tableStyleRegionOfJson (o: JsonObject) : TableStyleRegion =
+        { RunFormat = prop "runStyle" o |> Option.map runStyleOfJson
+          ParaFormat = prop "paragraphFormat" o |> Option.map paragraphFormatOfJson
+          CellShading = str "cellShading" o |> Option.map colorOfStr }
+
+    let private tableStyleDefinitionToJson (d: TableStyleDefinition) : JsonNode =
+        obj_
+            [ "id", Some(jstr d.Id)
+              "name", Some(jstr d.Name)
+              "basedOn", d.BasedOn |> Option.map jstr
+              "borders", d.Borders |> Option.map tableBordersToJson
+              "wholeTable", tableStyleRegionToJson d.WholeTable
+              "firstRow", tableStyleRegionToJson d.FirstRow
+              "bandedRow", tableStyleRegionToJson d.BandedRow ]
+        :> JsonNode
+
+    let private tableStyleDefinitionOfJson (n: JsonNode) : TableStyleDefinition =
+        let o = n.AsObject()
+
+        { Id = str "id" o |> Option.get
+          Name = str "name" o |> Option.get
+          BasedOn = str "basedOn" o
+          Borders = prop "borders" o |> Option.map tableBordersOfJson
+          WholeTable = prop "wholeTable" o |> Option.map tableStyleRegionOfJson |> Option.defaultValue TableStyleRegion.None
+          FirstRow = prop "firstRow" o |> Option.map tableStyleRegionOfJson |> Option.defaultValue TableStyleRegion.None
+          BandedRow = prop "bandedRow" o |> Option.map tableStyleRegionOfJson |> Option.defaultValue TableStyleRegion.None }
+
     // --- Top level ------------------------------------------------------------------------
 
     /// `Document` -> `JsonObject`. See this file's own conventions above and the worked
@@ -684,7 +790,8 @@ module Json =
               "numbering", (if doc.Numbering.IsEmpty then None else Some(JsonArray(doc.Numbering |> List.map numberingDefinitionToJson |> Array.ofList)))
               "protection", doc.Protection |> Option.map protectionToJson
               "vbaProject", doc.VbaProject |> Option.map (fun b -> jstr (Convert.ToBase64String(b)))
-              "properties", (if doc.Properties = DocumentProperties.Default then None else Some(documentPropertiesToJson doc.Properties)) ]
+              "properties", (if doc.Properties = DocumentProperties.Default then None else Some(documentPropertiesToJson doc.Properties))
+              "tableStyles", (if doc.TableStyles.IsEmpty then None else Some(JsonArray(doc.TableStyles |> List.map tableStyleDefinitionToJson |> Array.ofList))) ]
 
     /// `JsonObject` -> `Document`, the inverse of `toDocument`.
     let ofDocument (o: JsonObject) : Document =
@@ -693,4 +800,5 @@ module Json =
           Numbering = arr "numbering" o |> List.map numberingDefinitionOfJson
           Protection = prop "protection" o |> Option.map protectionOfJson
           VbaProject = str "vbaProject" o |> Option.map Convert.FromBase64String
-          Properties = prop "properties" o |> Option.map documentPropertiesOfJson |> Option.defaultValue DocumentProperties.Default }
+          Properties = prop "properties" o |> Option.map documentPropertiesOfJson |> Option.defaultValue DocumentProperties.Default
+          TableStyles = arr "tableStyles" o |> List.map tableStyleDefinitionOfJson }

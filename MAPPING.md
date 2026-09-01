@@ -19,7 +19,11 @@ inexact, lossy, or simply not implemented yet, so you know what to expect from a
   double/at-least/exactly/multiple), indentation (left/right/first-line/hanging),
   keep-with-next, page-break-before, borders (`BorderStyle`, the same shape reused for
   table/cell borders - top/bottom/left/right only, no `between`/`bar`, same gap as table
-  borders not modeling diagonals), shading (background fill color).
+  borders not modeling diagonals), shading (background fill color), custom tab stops
+  (left/center/right/decimal/bar alignment, dot/hyphen/underscore/heavy/middle-dot
+  leaders, plus an `OtherTabAlignment` escape hatch) - an empty `TabStops` list means "no
+  custom tabs", not "clear Word's own inherited defaults" (this DSL doesn't author
+  `w:val="clear"` entries).
 - **Named styles** (`styles.xml`): paragraph and character styles, with `BasedOn`
   inheritance (the chain itself isn't resolved by this DSL - see the gap below) and a
   small built-in catalog (`BuiltInStyles.normal`/`heading1`/`2`/`3`/`title`/
@@ -32,10 +36,18 @@ inexact, lossy, or simply not implemented yet, so you know what to expect from a
   distinct list - see the gap below on multi-level lists.
 - **Tables**: rows and cells with horizontal merge (`GridSpan`) and vertical merge
   (`Restart`/`Continue`), per-cell shading and border overrides, column widths, a table
-  style reference (name + banding flags - not a style *definition*, see the gap below),
-  table-level borders (outer sides plus inside horizontal/vertical). A cell's content is a
-  `Block list`, so a cell containing a nested table is exactly how Word itself represents
-  one.
+  style reference (name + banding flags - either a built-in like `"TableGrid"`, or a
+  custom `TableStyleDefinition`, see below), table-level borders (outer sides plus inside
+  horizontal/vertical), a table-wide default cell margin (`CellMargins` - top/bottom/
+  left/right, no per-cell override, see the gap below), and a row's own "repeat as header
+  on every page" flag (`TableRow.RepeatAsHeader`). A cell's content is a `Block list`, so
+  a cell containing a nested table is exactly how Word itself represents one.
+- **Custom table style definitions** (`TableStyleDefinition`, `styles.xml` `w:type="table"`
+  entries, referenced from `Document.TableStyles` by a `TableStyleRef.Name` the same way a
+  built-in name is): base table borders, plus three of OOXML's ten conditional-formatting
+  regions - whole-table defaults, a distinct first (header) row, and one alternating-row
+  band - each with its own run/paragraph formatting and cell shading. See the gap below on
+  the seven regions not covered.
 - **Images**: PNG/JPEG/GIF/BMP raster images anchored inline within a run (the natural
   placement for Word, unlike Excel's cell-range anchor) - `Data` is the image file's own
   raw bytes, embedded and read back byte-for-byte with no decoding/re-encoding.
@@ -107,10 +119,15 @@ inexact, lossy, or simply not implemented yet, so you know what to expect from a
   inline content within a single paragraph in this DSL - a foreign file with either
   spanning multiple paragraphs degrades on read (the range is not reconstructed across the
   paragraph boundary).
-- **Table style *definitions*.** `TableStyleRef.Name` is a reference to a style by name (a
-  built-in like `"TableGrid"`, or a custom one defined elsewhere in the document) - this
-  DSL doesn't model custom table style *definitions* themselves, only the reference, same
-  documented gap Excel's own `TableStyle.Name` has.
+- **Table style definitions beyond whole-table/first-row/one banding axis.** OOXML defines
+  ten conditional-formatting regions for a table style (also: last row, first/last column,
+  a second banding axis, four corner cells) - `TableStyleDefinition` models the three
+  overwhelmingly used in practice (see "Modeled faithfully" above); the other seven aren't
+  authored or read, same "narrow scope, document the gap" posture the rest of this module
+  takes.
+- **Per-cell margin overrides.** `TableEntry.CellMargins` is the table-wide default
+  (`w:tblCellMar`) only - a single cell's own `w:tcMar` override isn't modeled, so a
+  foreign file using one degrades to the table's default on read.
 - **Multi-level numbering.** `NumberingDefinition.Levels` supports several levels, but this
   DSL doesn't validate that a paragraph's `(numId, level)` reference and a level's own
   `Text` placeholder pattern (e.g. `"%1.%2"`) actually agree - malformed combinations write

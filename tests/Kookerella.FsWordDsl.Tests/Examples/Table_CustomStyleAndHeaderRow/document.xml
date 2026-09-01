@@ -7,36 +7,58 @@
         <margins top="72" bottom="72" left="72" right="72" header="36" footer="36" gutter="0" />
       </pageSetup>
       <body>
-        <para>
-          <paragraphFormat alignment="center" spacingBefore="12" spacingAfter="12" />
-          <run>Centered heading-like text.</run>
-        </para>
-        <para>
-          <paragraphFormat>
-            <lineSpacing kind="double" />
-            <indentation left="36" />
-          </paragraphFormat>
-          <run>An indented, double-spaced paragraph.</run>
-        </para>
-        <para>
-          <paragraphFormat shading="D9D9D9">
-            <borders>
-              <top style="single" width="1" color="000000" />
-              <bottom style="single" width="1" color="000000" />
-            </borders>
-          </paragraphFormat>
-          <run>A paragraph with top/bottom borders and shading.</run>
-        </para>
-        <para>
-          <paragraphFormat>
-            <tabs>
-              <tab position="288" alignment="right" leader="dot" />
-            </tabs>
-          </paragraphFormat>
-          <run>Introduction</run>
-          <tab />
-          <run>1</run>
-        </para>
+        <table>
+          <tableStyle name="MyTableStyle" />
+          <cellMargins top="4" bottom="4" left="6" right="6" />
+          <columnWidths>
+            <col width="200" />
+            <col width="150" />
+          </columnWidths>
+          <rows>
+            <row height="20" repeatAsHeader="true">
+              <cell>
+                <cellProps width="200" />
+                <para>
+                  <run>Name</run>
+                </para>
+              </cell>
+              <cell>
+                <cellProps width="150" />
+                <para>
+                  <run>Amount</run>
+                </para>
+              </cell>
+            </row>
+            <row>
+              <cell>
+                <cellProps width="200" />
+                <para>
+                  <run>Widgets</run>
+                </para>
+              </cell>
+              <cell>
+                <cellProps width="150" />
+                <para>
+                  <run>12</run>
+                </para>
+              </cell>
+            </row>
+            <row>
+              <cell>
+                <cellProps width="200" />
+                <para>
+                  <run>Gadgets</run>
+                </para>
+              </cell>
+              <cell>
+                <cellProps width="150" />
+                <para>
+                  <run>7</run>
+                </para>
+              </cell>
+            </row>
+          </rows>
+        </table>
       </body>
     </section>
   </sections>
@@ -81,4 +103,20 @@
       <runStyle size="10" />
     </style>
   </styles>
+  <tableStyles>
+    <tableStyleDef id="MyTableStyle" name="My Table Style">
+      <tableBorders>
+        <left style="single" width="0.5" color="000000" />
+        <right style="single" width="0.5" color="000000" />
+        <top style="single" width="0.5" color="000000" />
+        <bottom style="single" width="0.5" color="000000" />
+        <insideHorizontal style="single" width="0.5" color="000000" />
+        <insideVertical style="single" width="0.5" color="000000" />
+      </tableBorders>
+      <firstRow cellShading="4F81BD">
+        <runStyle bold="true" color="FFFFFF" />
+      </firstRow>
+      <bandedRow cellShading="DCE6F1" />
+    </tableStyleDef>
+  </tableStyles>
 </document>
