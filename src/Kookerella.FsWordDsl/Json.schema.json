@@ -21,7 +21,7 @@
     },
     "pageSetup": {
       "type": "object",
-      "required": ["pageSize", "orientation", "margins", "columns"],
+      "required": ["pageSize", "orientation", "margins", "columns", "breakType"],
       "properties": {
         "pageSize": { "$ref": "#/$defs/pageSize" },
         "orientation": { "type": "string", "enum": ["Portrait", "Landscape"] },
@@ -29,7 +29,8 @@
         "header": { "$ref": "#/$defs/headerFooterSet" },
         "footer": { "$ref": "#/$defs/headerFooterSet" },
         "pageNumberStart": { "type": "integer" },
-        "columns": { "type": "integer" }
+        "columns": { "type": "integer" },
+        "breakType": { "type": "string", "enum": ["NextPageBreak", "ContinuousBreak", "EvenPageBreak", "OddPageBreak"] }
       }
     },
     "pageSize": {

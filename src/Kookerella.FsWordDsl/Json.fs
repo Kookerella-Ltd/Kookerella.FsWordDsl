@@ -280,6 +280,45 @@ module Json =
 
     // --- Inline content ---------------------------------------------------------------------
 
+    // --- Paragraphs / tables -----------------------------------------------------------------
+
+    let private tableStyleRefToJson (s: TableStyleRef) : JsonNode =
+        obj_
+            [ "name", Some(jstr s.Name)
+              "firstRow", (if s.FirstRowBanding then Some(jbool true) else None)
+              "lastRow", (if s.LastRowBanding then Some(jbool true) else None)
+              "bandedRows", (if s.BandedRows then Some(jbool true) else None)
+              "bandedColumns", (if s.BandedColumns then Some(jbool true) else None) ]
+        :> JsonNode
+
+    let private tableStyleRefOfJson (o: JsonObject) : TableStyleRef =
+        { Name = str "name" o |> Option.get
+          FirstRowBanding = boolean "firstRow" o
+          LastRowBanding = boolean "lastRow" o
+          BandedRows = boolean "bandedRows" o
+          BandedColumns = boolean "bandedColumns" o }
+
+    let private tableCellPropsToJson (p: TableCellProps) : JsonNode =
+        obj_
+            [ "gridSpan", p.GridSpan |> Option.map jint
+              "verticalMerge", p.VerticalMerge |> Option.map (function RestartMerge -> jstr "restart" | ContinueMerge -> jstr "continue")
+              "shading", p.Shading |> Option.map (colorToStr >> jstr)
+              "borders", p.Borders |> Option.map tableBordersToJson
+              "width", p.Width |> Option.map jnum ]
+        :> JsonNode
+
+    let private tableCellPropsOfJson (o: JsonObject) : TableCellProps =
+        { GridSpan = intg "gridSpan" o
+          VerticalMerge = str "verticalMerge" o |> Option.map (fun s -> if s = "continue" then ContinueMerge else RestartMerge)
+          Shading = str "shading" o |> Option.map colorOfStr
+          Borders = prop "borders" o |> Option.map tableBordersOfJson
+          Width = num "width" o }
+
+    // `inlineToJson`/`inlineOfJson` need `blockToJson`/`blockOfJson` (a `Footnote`/
+    // `Endnote`'s own body is a `Block list`), which need `paragraphToJson`/
+    // `paragraphOfJson`, which need `inlineToJson`/`inlineOfJson` back for a paragraph's
+    // own `Inlines` - one `rec ... and ...` chain, same cycle `Xml.fs`'s equivalent
+    // functions are chained for.
     let rec private inlineToJson (i: Inline) : JsonNode =
         match i with
         | Run(text, style, styleId) ->
@@ -316,8 +355,10 @@ module Json =
             :> JsonNode
         | Field(instr, cached) ->
             obj_ [ "field", Some(obj_ [ "instruction", Some(jstr instr); "cachedResult", cached |> Option.map jstr ] :> JsonNode) ] :> JsonNode
+        | Footnote content -> obj_ [ "footnote", Some(JsonArray(content |> List.map blockToJson |> Array.ofList) :> JsonNode) ] :> JsonNode
+        | Endnote content -> obj_ [ "endnote", Some(JsonArray(content |> List.map blockToJson |> Array.ofList) :> JsonNode) ] :> JsonNode
 
-    let rec private inlineOfJson (n: JsonNode) : Inline =
+    and private inlineOfJson (n: JsonNode) : Inline =
         match n with
         | :? JsonValue as v ->
             match v.GetValue<string>() with
@@ -346,12 +387,14 @@ module Json =
             elif not (isNull o.["field"]) then
                 let f = o.["field"].AsObject()
                 Field(str "instruction" f |> Option.get, str "cachedResult" f)
+            elif not (isNull o.["footnote"]) then
+                Footnote(o.["footnote"].AsArray() |> Seq.map blockOfJson |> List.ofSeq)
+            elif not (isNull o.["endnote"]) then
+                Endnote(o.["endnote"].AsArray() |> Seq.map blockOfJson |> List.ofSeq)
             else
                 failwith "Unknown inline JSON shape"
 
-    // --- Paragraphs / tables -----------------------------------------------------------------
-
-    let private paragraphToJson (p: Paragraph) : JsonNode =
+    and private paragraphToJson (p: Paragraph) : JsonNode =
         obj_
             [ "styleId", p.StyleId |> Option.map jstr
               "format", p.Format |> Option.map paragraphFormatToJson
@@ -360,7 +403,7 @@ module Json =
               "inlines", Some(JsonArray(p.Inlines |> List.map inlineToJson |> Array.ofList)) ]
         :> JsonNode
 
-    let private paragraphOfJson (o: JsonObject) : Paragraph =
+    and private paragraphOfJson (o: JsonObject) : Paragraph =
         { Inlines = arr "inlines" o |> List.map inlineOfJson
           StyleId = str "styleId" o
           Format = prop "format" o |> Option.map paragraphFormatOfJson
@@ -368,39 +411,7 @@ module Json =
                       | Some n, Some l -> Some(n, l)
                       | _ -> None }
 
-    let private tableStyleRefToJson (s: TableStyleRef) : JsonNode =
-        obj_
-            [ "name", Some(jstr s.Name)
-              "firstRow", (if s.FirstRowBanding then Some(jbool true) else None)
-              "lastRow", (if s.LastRowBanding then Some(jbool true) else None)
-              "bandedRows", (if s.BandedRows then Some(jbool true) else None)
-              "bandedColumns", (if s.BandedColumns then Some(jbool true) else None) ]
-        :> JsonNode
-
-    let private tableStyleRefOfJson (o: JsonObject) : TableStyleRef =
-        { Name = str "name" o |> Option.get
-          FirstRowBanding = boolean "firstRow" o
-          LastRowBanding = boolean "lastRow" o
-          BandedRows = boolean "bandedRows" o
-          BandedColumns = boolean "bandedColumns" o }
-
-    let private tableCellPropsToJson (p: TableCellProps) : JsonNode =
-        obj_
-            [ "gridSpan", p.GridSpan |> Option.map jint
-              "verticalMerge", p.VerticalMerge |> Option.map (function RestartMerge -> jstr "restart" | ContinueMerge -> jstr "continue")
-              "shading", p.Shading |> Option.map (colorToStr >> jstr)
-              "borders", p.Borders |> Option.map tableBordersToJson
-              "width", p.Width |> Option.map jnum ]
-        :> JsonNode
-
-    let private tableCellPropsOfJson (o: JsonObject) : TableCellProps =
-        { GridSpan = intg "gridSpan" o
-          VerticalMerge = str "verticalMerge" o |> Option.map (fun s -> if s = "continue" then ContinueMerge else RestartMerge)
-          Shading = str "shading" o |> Option.map colorOfStr
-          Borders = prop "borders" o |> Option.map tableBordersOfJson
-          Width = num "width" o }
-
-    let rec private blockToJson (b: Block) : JsonNode =
+    and private blockToJson (b: Block) : JsonNode =
         match b with
         | ParagraphBlock p -> obj_ [ "para", Some(paragraphToJson p) ] :> JsonNode
         | TableBlock t -> obj_ [ "table", Some(tableToJson t) ] :> JsonNode
@@ -505,8 +516,16 @@ module Json =
               "header", s.Header |> Option.map headerFooterSetToJson
               "footer", s.Footer |> Option.map headerFooterSetToJson
               "pageNumberStart", s.PageNumberStart |> Option.map jint
-              "columns", Some(jint s.Columns) ]
+              "columns", Some(jint s.Columns)
+              "breakType", Some(jstr (sprintf "%A" s.BreakType)) ]
         :> JsonNode
+
+    let private sectionBreakTypeOfJson (s: string option) : SectionBreakType =
+        match s with
+        | Some "ContinuousBreak" -> ContinuousBreak
+        | Some "EvenPageBreak" -> EvenPageBreak
+        | Some "OddPageBreak" -> OddPageBreak
+        | _ -> NextPageBreak
 
     let private sectionPropertiesOfJson (o: JsonObject) : SectionProperties =
         { PageSize = pageSizeOfJson o.["pageSize"]
@@ -515,7 +534,8 @@ module Json =
           Header = prop "header" o |> Option.map headerFooterSetOfJson
           Footer = prop "footer" o |> Option.map headerFooterSetOfJson
           PageNumberStart = intg "pageNumberStart" o
-          Columns = intg "columns" o |> Option.defaultValue 1 }
+          Columns = intg "columns" o |> Option.defaultValue 1
+          BreakType = sectionBreakTypeOfJson (str "breakType" o) }
 
     let private sectionToJson (s: Section) : JsonNode =
         obj_ [ "pageSetup", Some(sectionPropertiesToJson s.Properties); "body", Some(JsonArray(s.Body |> List.map blockToJson |> Array.ofList)) ] :> JsonNode

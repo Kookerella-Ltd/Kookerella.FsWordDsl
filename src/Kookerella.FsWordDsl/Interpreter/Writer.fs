@@ -28,9 +28,16 @@ module Writer =
     type private Ctx =
         { MainPart: MainDocumentPart
           Comments: ResizeArray<Wordprocessing.Comment>
+          /// `(id, note element)` pairs, in the order encountered - written to `word/
+          /// footnotes.xml`/`endnotes.xml` (alongside the two boilerplate separator entries
+          /// every real Word file carries) once the whole body has been walked.
+          Footnotes: ResizeArray<int * Wordprocessing.Footnote>
+          Endnotes: ResizeArray<int * Wordprocessing.Endnote>
           mutable NextBookmarkId: int
           mutable NextCommentId: int
           mutable NextDrawingId: uint32
+          mutable NextFootnoteId: int
+          mutable NextEndnoteId: int
           /// Whether ANY section uses an `Even` header/footer - `<w:evenAndOddHeaders/>` is
           /// a document-wide `settings.xml` flag, not a per-section `sectPr` child, unlike
           /// `<w:titlePg/>` (which genuinely is per-section).
@@ -157,6 +164,56 @@ module Writer =
         r.AppendChild(child) |> ignore
         r
 
+    /// Prepends a note-reference-mark run (`w:footnoteRef`/`w:endnoteRef`, styled via
+    /// `markerStyleId`) to the FIRST paragraph of a note body's already-built OOXML
+    /// elements - inserted right after that paragraph's own `w:pPr` if it has one (which
+    /// must stay the first child per schema), otherwise as the new first child outright. A
+    /// note body with no paragraph at all (an empty `content` list, or one starting with a
+    /// table) gets a synthetic leading paragraph to carry the marker, matching what real
+    /// Word itself does.
+    let private insertNoteMarker (markerStyleId: string) (mark: OpenXmlElement) (elements: OpenXmlElement list) : OpenXmlElement list =
+        let markerRun = Wordprocessing.Run()
+        markerRun.AppendChild(Wordprocessing.RunProperties(RunStyle = Wordprocessing.RunStyle(Val = StringValue markerStyleId))) |> ignore
+        markerRun.AppendChild(mark) |> ignore
+
+        match elements with
+        | (:? Wordprocessing.Paragraph as firstPara) :: rest ->
+            (match firstPara.ParagraphProperties with
+             | null -> firstPara.PrependChild(markerRun) |> ignore
+             | pPr -> firstPara.InsertAfter(markerRun, pPr) |> ignore)
+
+            (firstPara :> OpenXmlElement) :: rest
+        | _ ->
+            let p = Wordprocessing.Paragraph()
+            p.AppendChild(markerRun) |> ignore
+            (p :> OpenXmlElement) :: elements
+
+    /// Builds the boilerplate separator entries (`id = -1` "separator", `id = 0`
+    /// "continuationSeparator") every real Word-authored `footnotes.xml`/`endnotes.xml`
+    /// carries, for the horizontal separator line above the notes area - schema-optional,
+    /// but real Word relies on their presence for correct rendering, so `Writer` always
+    /// includes them whenever it writes either part at all.
+    let private separatorParagraph (mark: OpenXmlElement) : Wordprocessing.Paragraph =
+        let p = Wordprocessing.Paragraph()
+        let r = Wordprocessing.Run()
+        r.AppendChild(mark) |> ignore
+        p.AppendChild(r) |> ignore
+        p
+
+    let private paragraphPropertiesFull
+        (styleId: string option)
+        (format: ParagraphFormat option)
+        (numbering: (int * int) option)
+        : Wordprocessing.ParagraphProperties option =
+        let basePr = paragraphPropertiesOf styleId format
+
+        match numbering with
+        | None -> basePr
+        | Some(numId, level) ->
+            let pPr = basePr |> Option.defaultValue (Wordprocessing.ParagraphProperties())
+            pPr.NumberingProperties <- Wordprocessing.NumberingProperties(Wordprocessing.NumberingLevelReference(Val = Int32Value level), Wordprocessing.NumberingId(Val = Int32Value numId))
+            Some pPr
+
     let rec private inlineToElements (ctx: Ctx) (inl: Inline) : OpenXmlElement list =
         match inl with
         | Run(text, style, styleId) -> [ textRun text style styleId :> OpenXmlElement ]
@@ -209,30 +266,55 @@ module Writer =
             let sf = Wordprocessing.SimpleField(Instruction = StringValue instruction)
             cachedResult |> Option.iter (fun c -> sf.AppendChild(runWith (Wordprocessing.Text(c))) |> ignore)
             [ sf :> OpenXmlElement ]
+        | Footnote content ->
+            let id = ctx.NextFootnoteId
+            ctx.NextFootnoteId <- id + 1
+
+            let note = Wordprocessing.Footnote(Id = IntegerValue id)
+
+            content
+            |> List.map (blockToW ctx)
+            |> insertNoteMarker "FootnoteReference" (Wordprocessing.FootnoteReferenceMark())
+            |> List.iter (fun el -> note.AppendChild(el) |> ignore)
+
+            ctx.Footnotes.Add(id, note)
+
+            let refRun = Wordprocessing.Run()
+            refRun.AppendChild(Wordprocessing.RunProperties(RunStyle = Wordprocessing.RunStyle(Val = StringValue "FootnoteReference"))) |> ignore
+            refRun.AppendChild(Wordprocessing.FootnoteReference(Id = IntegerValue id)) |> ignore
+            [ refRun :> OpenXmlElement ]
+        | Endnote content ->
+            let id = ctx.NextEndnoteId
+            ctx.NextEndnoteId <- id + 1
+
+            let note = Wordprocessing.Endnote(Id = IntegerValue id)
+
+            content
+            |> List.map (blockToW ctx)
+            |> insertNoteMarker "EndnoteReference" (Wordprocessing.EndnoteReferenceMark())
+            |> List.iter (fun el -> note.AppendChild(el) |> ignore)
+
+            ctx.Endnotes.Add(id, note)
+
+            let refRun = Wordprocessing.Run()
+            refRun.AppendChild(Wordprocessing.RunProperties(RunStyle = Wordprocessing.RunStyle(Val = StringValue "EndnoteReference"))) |> ignore
+            refRun.AppendChild(Wordprocessing.EndnoteReference(Id = IntegerValue id)) |> ignore
+            [ refRun :> OpenXmlElement ]
 
     // --- Paragraphs / tables ----------------------------------------------------------------
+    //
+    // Continues the same `rec ... and ...` chain `inlineToElements` above started, rather
+    // than a separate group - `Footnote`/`Endnote` above call `blockToW` (a note's body is a
+    // `Block list`), which calls `paragraphToW`, which calls `inlineToElements` for its own
+    // `Inlines`, closing the cycle the model-level `Inline`/`Block` mutual recursion implies.
 
-    let private paragraphPropertiesFull
-        (styleId: string option)
-        (format: ParagraphFormat option)
-        (numbering: (int * int) option)
-        : Wordprocessing.ParagraphProperties option =
-        let basePr = paragraphPropertiesOf styleId format
-
-        match numbering with
-        | None -> basePr
-        | Some(numId, level) ->
-            let pPr = basePr |> Option.defaultValue (Wordprocessing.ParagraphProperties())
-            pPr.NumberingProperties <- Wordprocessing.NumberingProperties(Wordprocessing.NumberingLevelReference(Val = Int32Value level), Wordprocessing.NumberingId(Val = Int32Value numId))
-            Some pPr
-
-    let private paragraphToW (ctx: Ctx) (p: Paragraph) : Wordprocessing.Paragraph =
+    and private paragraphToW (ctx: Ctx) (p: Paragraph) : Wordprocessing.Paragraph =
         let para = Wordprocessing.Paragraph()
         paragraphPropertiesFull p.StyleId p.Format p.Numbering |> Option.iter (fun pPr -> para.ParagraphProperties <- pPr)
         p.Inlines |> List.collect (inlineToElements ctx) |> List.iter (para.AppendChild >> ignore)
         para
 
-    let rec private blockToW (ctx: Ctx) (block: Block) : OpenXmlElement =
+    and private blockToW (ctx: Ctx) (block: Block) : OpenXmlElement =
         match block with
         | ParagraphBlock p -> paragraphToW ctx p :> OpenXmlElement
         | TableBlock t -> tableEntryToW ctx t :> OpenXmlElement
@@ -353,6 +435,16 @@ module Writer =
         part.Footer <- Wordprocessing.Footer(blocks |> List.map (blockToW ctx))
         ctx.MainPart.GetIdOfPart(part)
 
+    let private sectionBreakTypeToW (t: SectionBreakType) : Wordprocessing.SectionMarkValues option =
+        match t with
+        // Not written at all - "next page" is Word's own default when `<w:type>` is
+        // absent, same "only write what differs from the default" posture the rest of
+        // this DSL takes (e.g. `BorderSide.Width = None` uses OOXML's own default weight).
+        | NextPageBreak -> None
+        | ContinuousBreak -> Some Wordprocessing.SectionMarkValues.Continuous
+        | EvenPageBreak -> Some Wordprocessing.SectionMarkValues.EvenPage
+        | OddPageBreak -> Some Wordprocessing.SectionMarkValues.OddPage
+
     /// Builds the `<w:sectPr>` for one section, wiring header/footer relationship ids and
     /// the auto-flag(s) they each require (see `Model.HeaderFooterSet`'s own doc comment).
     let private sectionPropertiesToW (ctx: Ctx) (props: SectionProperties) : Wordprocessing.SectionProperties =
@@ -370,6 +462,11 @@ module Writer =
             f.First |> Option.iter (fun blocks -> sectPr.AppendChild(Wordprocessing.FooterReference(Type = EnumValue Wordprocessing.HeaderFooterValues.First, Id = StringValue(addFooterPart ctx blocks))) |> ignore; titlePage <- true)
             f.Default |> Option.iter (fun blocks -> sectPr.AppendChild(Wordprocessing.FooterReference(Type = EnumValue Wordprocessing.HeaderFooterValues.Default, Id = StringValue(addFooterPart ctx blocks))) |> ignore)
             f.Even |> Option.iter (fun blocks -> sectPr.AppendChild(Wordprocessing.FooterReference(Type = EnumValue Wordprocessing.HeaderFooterValues.Even, Id = StringValue(addFooterPart ctx blocks))) |> ignore; ctx.NeedsEvenAndOddHeaders <- true))
+
+        // `<w:type>` sits between the header/footer references and `<w:pgSz>` in CT_SectPr's
+        // own fixed element order - schema-valid only in that position.
+        sectionBreakTypeToW props.BreakType
+        |> Option.iter (fun v -> sectPr.AppendChild(Wordprocessing.SectionType(Val = EnumValue v)) |> ignore)
 
         sectPr.AppendChild(pageSizeToW props.PageSize props.Orientation) |> ignore
         sectPr.AppendChild(pageMarginsToW props.Margins) |> ignore
@@ -482,9 +579,13 @@ module Writer =
         let ctx =
             { MainPart = mainPart
               Comments = ResizeArray()
+              Footnotes = ResizeArray()
+              Endnotes = ResizeArray()
               NextBookmarkId = 1
               NextCommentId = 0
               NextDrawingId = 1u
+              NextFootnoteId = 1
+              NextEndnoteId = 1
               NeedsEvenAndOddHeaders = false }
 
         let stylesPart = mainPart.AddNewPart<StyleDefinitionsPart>()
@@ -521,6 +622,34 @@ module Writer =
         if ctx.Comments.Count > 0 then
             let commentsPart = mainPart.AddNewPart<WordprocessingCommentsPart>()
             commentsPart.Comments <- Wordprocessing.Comments(ctx.Comments |> Seq.map (fun c -> c :> OpenXmlElement))
+
+        if ctx.Footnotes.Count > 0 then
+            let footnotesPart = mainPart.AddNewPart<FootnotesPart>()
+            let footnotesEl = Wordprocessing.Footnotes()
+
+            let separator = Wordprocessing.Footnote(Id = IntegerValue -1, Type = EnumValue Wordprocessing.FootnoteEndnoteValues.Separator)
+            separator.AppendChild(separatorParagraph (Wordprocessing.SeparatorMark())) |> ignore
+            let continuationSeparator = Wordprocessing.Footnote(Id = IntegerValue 0, Type = EnumValue Wordprocessing.FootnoteEndnoteValues.ContinuationSeparator)
+            continuationSeparator.AppendChild(separatorParagraph (Wordprocessing.ContinuationSeparatorMark())) |> ignore
+            footnotesEl.AppendChild(separator) |> ignore
+            footnotesEl.AppendChild(continuationSeparator) |> ignore
+
+            ctx.Footnotes |> Seq.sortBy fst |> Seq.iter (fun (_, note) -> footnotesEl.AppendChild(note) |> ignore)
+            footnotesPart.Footnotes <- footnotesEl
+
+        if ctx.Endnotes.Count > 0 then
+            let endnotesPart = mainPart.AddNewPart<EndnotesPart>()
+            let endnotesEl = Wordprocessing.Endnotes()
+
+            let separator = Wordprocessing.Endnote(Id = IntegerValue -1, Type = EnumValue Wordprocessing.FootnoteEndnoteValues.Separator)
+            separator.AppendChild(separatorParagraph (Wordprocessing.SeparatorMark())) |> ignore
+            let continuationSeparator = Wordprocessing.Endnote(Id = IntegerValue 0, Type = EnumValue Wordprocessing.FootnoteEndnoteValues.ContinuationSeparator)
+            continuationSeparator.AppendChild(separatorParagraph (Wordprocessing.ContinuationSeparatorMark())) |> ignore
+            endnotesEl.AppendChild(separator) |> ignore
+            endnotesEl.AppendChild(continuationSeparator) |> ignore
+
+            ctx.Endnotes |> Seq.sortBy fst |> Seq.iter (fun (_, note) -> endnotesEl.AppendChild(note) |> ignore)
+            endnotesPart.Endnotes <- endnotesEl
 
         doc.VbaProject
         |> Option.iter (fun bytes ->

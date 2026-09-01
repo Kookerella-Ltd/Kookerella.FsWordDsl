@@ -45,6 +45,7 @@
     <xs:attribute name="orientation" type="xs:string" use="required" />
     <xs:attribute name="pageNumberStart" type="xs:int" />
     <xs:attribute name="columns" type="xs:int" use="required" />
+    <xs:attribute name="breakType" type="xs:string" use="required" />
   </xs:complexType>
 
   <xs:complexType name="pageSizeType">
@@ -87,6 +88,8 @@
         <xs:element name="bookmark" type="bookmarkType" />
         <xs:element name="comment" type="commentType" />
         <xs:element name="field" type="fieldType" />
+        <xs:element name="footnote" type="noteType" />
+        <xs:element name="endnote" type="noteType" />
       </xs:choice>
     </xs:sequence>
     <xs:attribute name="styleId" type="xs:string" />
@@ -160,6 +163,15 @@
   <xs:complexType name="fieldType">
     <xs:attribute name="instruction" type="xs:string" use="required" />
     <xs:attribute name="cachedResult" type="xs:string" />
+  </xs:complexType>
+
+  <!-- A footnote/endnote's own body - block content (para/table), same shape as
+       `bodyType`, wrapped in its own element name since `footnote`/`endnote` sit inside
+       `inlineContentType`'s choice, not `bodyType`'s. -->
+  <xs:complexType name="noteType">
+    <xs:sequence>
+      <xs:element name="body" type="bodyType" />
+    </xs:sequence>
   </xs:complexType>
 
   <!-- Formatting -->

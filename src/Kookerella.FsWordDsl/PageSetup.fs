@@ -11,6 +11,17 @@ module PageSetup =
         | Portrait
         | Landscape
 
+    /// How this section begins relative to the previous one (`w:sectPr/w:type`) - Word's
+    /// own `SectionMarkValues` also has `NextColumn`, only meaningful for a multi-column
+    /// section, which isn't modeled distinctly here; a caller wanting that effect uses
+    /// `NextPageBreak` (the same "not written, Word's own default" treatment `Writer` gives
+    /// it) since this DSL's `Columns` field already covers the multi-column case itself.
+    type SectionBreakType =
+        | NextPageBreak
+        | ContinuousBreak
+        | EvenPageBreak
+        | OddPageBreak
+
     /// A small named set covering common paper sizes, plus `OtherPaperSize` for any other
     /// OOXML `ST_PageSize` code - same "small named set + raw escape hatch" convention
     /// Excel's own `PaperSize` uses. Width/height are derived from the name at write time

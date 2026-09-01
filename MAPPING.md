@@ -49,8 +49,15 @@ inexact, lossy, or simply not implemented yet, so you know what to expect from a
     documents; real Word recalculates on open and overwrites it.
 - **Sections and page setup**: a document is a sequence of `Section`s, each with its own
   page size (named set plus custom/other escape hatches), orientation, margins, column
-  count, and starting page number - mapping 1:1 onto a real Word "next page" section break
-  (see the gap below on other section-break types).
+  count, starting page number, and break type (`SectionBreakType`: next-page - the default,
+  not written - continuous, even-page, odd-page).
+- **Footnotes and endnotes**: `Inline.Footnote`/`Endnote` mark a point in a paragraph's own
+  `Inlines`; `content` is the note's own body (`Block list` - ordinary paragraphs, or a
+  table) written to `word/footnotes.xml`/`endnotes.xml` and given a document-scoped
+  sequential id automatically. `Writer` prepends the note-reference-mark run itself (`w:
+  footnoteRef`/`w:endnoteRef`) to the body's first paragraph, and both parts always carry
+  the two boilerplate separator/continuation-separator entries a real Word-authored file
+  has - a caller never has to think about either. See the gap below on custom numbering.
 - **Headers and footers**: `Default`/`First`/`Even` variants per section, each arbitrary
   `Block` content - the `titlePg`/`evenAndOddHeaders` flags real Word needs to actually
   honor `First`/`Even` are set automatically whenever they're used.
@@ -80,8 +87,10 @@ inexact, lossy, or simply not implemented yet, so you know what to expect from a
   all - a document is always written (and read) as if "accept all changes" had already
   been applied.
 - **Content controls (structured document tags).** Not modeled.
-- **Footnotes and endnotes.** Not modeled - a natural candidate for a future
-  `Footnotes.fs`.
+- **Footnote/endnote numbering customization.** Always continuous decimal numbering
+  starting at 1, document-wide (Word's own default) - a custom number format, or
+  restarting the count per section/page, isn't modeled (`w:footnotePr`/`w:endnotePr` at the
+  section level aren't written or read).
 - **Real field computation.** Only raw instruction text + a cached display value round-trip
   (see "Modeled faithfully" above) - a table of contents, cross-reference, or any other
   field that depends on document layout is never actually computed by this DSL, unlike
@@ -104,10 +113,6 @@ inexact, lossy, or simply not implemented yet, so you know what to expect from a
 - **Text boxes, SmartArt, embedded charts/OLE objects.** Not modeled - a Word document's
   drawing canvas is used here only for the one inline-image case (see "Modeled faithfully"
   above).
-- **Section-break types other than "next page".** `SectionProperties` always corresponds
-  to a `w:sectPr` embedded either as the body's own trailing element or inside the last
-  paragraph of an earlier section - the real representation of a "next page" break.
-  Continuous, even-page, and odd-page section breaks aren't modeled.
 - **Digital signatures.** Not modeled.
 - **Password verification against real Word.** The modern salted-iterated-SHA512 scheme is
   implemented per the published algorithm, but unverified against real Word (no Word
@@ -129,8 +134,8 @@ inexact, lossy, or simply not implemented yet, so you know what to expect from a
 Nothing is currently in this bucket in the sense Excel's own `MAPPING.md` uses it (every
 SpreadsheetML feature Excel originally scoped out has since been implemented) - this repo
 is a first pass (F# core only; no C# wrapper or MCP server yet, see `CLAUDE.md`), so
-several of the "Known gaps" above (footnotes/endnotes, track changes, content controls)
-are realistic candidates for a genuine future extension rather than permanently excluded.
+several of the "Known gaps" above (track changes, content controls, text boxes) are
+realistic candidates for a genuine future extension rather than permanently excluded.
 
 ## A note on formatting
 

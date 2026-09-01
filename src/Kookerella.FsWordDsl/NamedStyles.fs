@@ -133,6 +133,56 @@ module NamedStyles =
                         Underline = Some SingleUnderline }
               ParaFormat = None }
 
+        /// The character style Word applies to a footnote/endnote's in-body reference mark
+        /// (superscripted) - `Writer` applies this automatically to the reference run it
+        /// generates for `Inline.Footnote`/`Endnote`, and to the matching mark inside the
+        /// note body itself, so a caller never has to reference these ids directly.
+        let footnoteReferenceCharStyle: StyleDefinition =
+            { Id = "FootnoteReference"
+              Name = "footnote reference"
+              Type = CharacterStyleType
+              BasedOn = None
+              RunFormat = Some { RunStyle.Default with VerticalPosition = Some Superscript }
+              ParaFormat = None }
+
+        let endnoteReferenceCharStyle: StyleDefinition =
+            { Id = "EndnoteReference"
+              Name = "endnote reference"
+              Type = CharacterStyleType
+              BasedOn = None
+              RunFormat = Some { RunStyle.Default with VerticalPosition = Some Superscript }
+              ParaFormat = None }
+
+        /// The paragraph style real Word gives footnote/endnote body text by default
+        /// (smaller than body text) - purely cosmetic, a caller's note-body paragraphs work
+        /// fine without ever referencing this id explicitly.
+        let footnoteTextStyle: StyleDefinition =
+            { Id = "FootnoteText"
+              Name = "footnote text"
+              Type = ParagraphStyleType
+              BasedOn = Some "Normal"
+              RunFormat = Some { RunStyle.Default with Size = Some 10.0 }
+              ParaFormat = None }
+
+        let endnoteTextStyle: StyleDefinition =
+            { Id = "EndnoteText"
+              Name = "endnote text"
+              Type = ParagraphStyleType
+              BasedOn = Some "Normal"
+              RunFormat = Some { RunStyle.Default with Size = Some 10.0 }
+              ParaFormat = None }
+
         /// Every built-in above, for `Document.Styles`' own default when a caller passes
         /// none explicitly - see `Builders.document`.
-        let all = [ normal; heading1; heading2; heading3; title; listParagraph; hyperlinkCharStyle ]
+        let all =
+            [ normal
+              heading1
+              heading2
+              heading3
+              title
+              listParagraph
+              hyperlinkCharStyle
+              footnoteReferenceCharStyle
+              endnoteReferenceCharStyle
+              footnoteTextStyle
+              endnoteTextStyle ]

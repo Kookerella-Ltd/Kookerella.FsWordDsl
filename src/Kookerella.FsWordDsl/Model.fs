@@ -50,13 +50,21 @@ module Model =
         /// computes one" posture Excel's `CellValue.Formula` documents - real Word
         /// recalculates on open and overwrites it.
         | Field of instruction: string * cachedResult: string option
+        /// A footnote/endnote reference mark, e.g. `Footnote [ ParagraphBlock { ... } ]` -
+        /// `content` is the note's own body (own paragraphs, possibly a table), stored in
+        /// `word/footnotes.xml`/`endnotes.xml` and referenced from here by an id `Writer`
+        /// assigns automatically. `Writer` also prepends the note-reference-mark run
+        /// (`w:footnoteRef`/`w:endnoteRef`) to the body's first paragraph itself - a caller
+        /// writes ordinary paragraph content and never has to think about that marker.
+        | Footnote of content: Block list
+        | Endnote of content: Block list
 
     /// One paragraph's content plus its formatting. `StyleId` references a named style
     /// (`Document.Styles`, e.g. `"Heading1"`) - the inheritance layer; `Format` is direct/
     /// inline formatting layered on top, same relationship `Styles.ParagraphFormat`'s own
     /// doc comment describes. `Numbering = Some(numId, level)` places this paragraph in a
     /// numbered/bulleted list (see `Numbering.fs`).
-    type Paragraph =
+    and Paragraph =
         { Inlines: Inline list
           StyleId: string option
           Format: ParagraphFormat option
@@ -67,7 +75,10 @@ module Model =
     /// `ParagraphBlock`/`TableBlock` are DSL-only names with no single corresponding OOXML
     /// element - real WordprocessingML body content is just a flat sequence of `<w:p>`/
     /// `<w:tbl>` elements, `Block` exists so this DSL can describe that sequence as one list.
-    type Block =
+    /// Joins the same recursive `and` chain as `TableCell` etc. below now that `Inline.
+    /// Footnote`/`Endnote` close a cycle back through here (a note's own body is itself a
+    /// `Block list`).
+    and Block =
         | ParagraphBlock of Paragraph
         | TableBlock of TableEntry
 
@@ -110,10 +121,11 @@ module Model =
 
     /// One section's page setup - a document is a sequence of `Section`s (see `Document`
     /// below), each with its own, mapping 1:1 onto a real Word section break rather than
-    /// needing a synthetic "section break" block type. Only the common "next page" section
-    /// break is modeled - continuous/even/odd-page break types are a documented gap.
-    /// `Columns` is the number of equal-width text columns (1 = the ordinary single-column
-    /// case).
+    /// needing a synthetic "section break" block type. `BreakType` is how *this* section
+    /// begins relative to the previous one (see `PageSetup.SectionBreakType`'s own doc
+    /// comment) - meaningless, and not written, for the very first section, since there's
+    /// no previous section for it to break from. `Columns` is the number of equal-width
+    /// text columns (1 = the ordinary single-column case).
     and SectionProperties =
         { PageSize: PageSize
           Orientation: PageOrientation
@@ -121,7 +133,8 @@ module Model =
           Header: HeaderFooterSet option
           Footer: HeaderFooterSet option
           PageNumberStart: int option
-          Columns: int }
+          Columns: int
+          BreakType: SectionBreakType }
 
         static member Default =
             { PageSize = Letter
@@ -130,7 +143,8 @@ module Model =
               Header = None
               Footer = None
               PageNumberStart = None
-              Columns = 1 }
+              Columns = 1
+              BreakType = NextPageBreak }
 
     and Section = { Body: Block list; Properties: SectionProperties }
 

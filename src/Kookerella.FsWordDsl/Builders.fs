@@ -106,6 +106,20 @@ type DocumentDsl =
 
     static member image(entry: ImageEntry) : Inline = Image entry
 
+    /// A footnote over plain text - applies `BuiltInStyles.footnoteTextStyle` to the note
+    /// body's own paragraph, same "caller doesn't restate the built-in id" convenience
+    /// `hyperlink`'s text overload gives.
+    static member footnote(text: string) : Inline =
+        Footnote [ ParagraphBlock { Inlines = [ Run(text, None, None) ]; StyleId = Some BuiltInStyles.footnoteTextStyle.Id; Format = None; Numbering = None } ]
+
+    /// A footnote wrapping already-built body content (several paragraphs, or a table).
+    static member footnote(content: Block list) : Inline = Footnote content
+
+    static member endnote(text: string) : Inline =
+        Endnote [ ParagraphBlock { Inlines = [ Run(text, None, None) ]; StyleId = Some BuiltInStyles.endnoteTextStyle.Id; Format = None; Numbering = None } ]
+
+    static member endnote(content: Block list) : Inline = Endnote content
+
     static member tableCell(content: Block list, ?props: TableCellProps) : TableCell =
         { Content = content
           Props = defaultArg props TableCellProps.Default }

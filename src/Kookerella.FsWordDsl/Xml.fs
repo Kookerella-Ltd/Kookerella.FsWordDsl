@@ -281,70 +281,6 @@ module Xml =
 
     // --- Inline content ---------------------------------------------------------------------
 
-    let rec private inlineToXml (i: Inline) : XElement =
-        match i with
-        | Run(text, style, styleId) ->
-            XElement(xn "run", attrOpt "styleId" styleId, (style |> Option.map runStyleToXml |> Option.toList), text)
-        | LineBreak -> XElement(xn "lineBreak")
-        | Tab -> XElement(xn "tab")
-        | PageBreak -> XElement(xn "pageBreak")
-        | Image img -> imageToXml img
-        | Hyperlink(target, runs, tooltip) ->
-            XElement(xn "hyperlink", attrOpt "tooltip" tooltip, hyperlinkTargetToXml target, XElement(xn "content", runs |> List.map inlineToXml))
-        | Bookmark(name, content) -> XElement(xn "bookmark", attr "name" name, content |> List.map inlineToXml)
-        | Comment(author, initials, date, text, content) ->
-            XElement(
-                xn "comment",
-                attr "author" author,
-                attrOpt "initials" initials,
-                attrOpt "date" (date |> Option.map (fun d -> d.ToString("o"))),
-                XElement(xn "text", text),
-                XElement(xn "content", content |> List.map inlineToXml)
-            )
-        | Field(instr, cached) -> XElement(xn "field", attr "instruction" instr, attrOpt "cachedResult" cached)
-
-    let rec private inlineOfXml (el: XElement) : Inline =
-        match el.Name.LocalName with
-        | "run" -> Run(el.Value, el.Element(xn "runStyle") |> Option.ofObj |> Option.map runStyleOfXml, strAttr "styleId" el)
-        | "lineBreak" -> LineBreak
-        | "tab" -> Tab
-        | "pageBreak" -> PageBreak
-        | "image" -> Image(imageOfXml el)
-        | "hyperlink" ->
-            let target = el.Elements() |> Seq.find (fun c -> c.Name.LocalName = "externalHyperlink" || c.Name.LocalName = "internalHyperlink") |> hyperlinkTargetOfXml
-            let content = el.Element(xn "content").Elements() |> Seq.map inlineOfXml |> List.ofSeq
-            Hyperlink(target, content, strAttr "tooltip" el)
-        | "bookmark" -> Bookmark(el.Attribute(xn "name").Value, el.Elements() |> Seq.map inlineOfXml |> List.ofSeq)
-        | "comment" ->
-            let content = el.Element(xn "content").Elements() |> Seq.map inlineOfXml |> List.ofSeq
-            let text = el.Element(xn "text").Value
-            Comment(el.Attribute(xn "author").Value, strAttr "initials" el, strAttr "date" el |> Option.map DateTime.Parse, text, content)
-        | "field" -> Field(el.Attribute(xn "instruction").Value, strAttr "cachedResult" el)
-        | other -> failwithf "Unknown inline element: %s" other
-
-    // --- Paragraphs / tables -----------------------------------------------------------------
-
-    let private paragraphToXml (p: Paragraph) : XElement =
-        XElement(
-            xn "para",
-            attrOpt "styleId" p.StyleId,
-            attrOpt "numId" (p.Numbering |> Option.map fst),
-            attrOpt "level" (p.Numbering |> Option.map snd),
-            (p.Format |> Option.map paragraphFormatToXml |> Option.toList),
-            p.Inlines |> List.map inlineToXml
-        )
-
-    let private paragraphOfXml (el: XElement) : Paragraph =
-        let numId = strAttr "numId" el |> Option.map int
-        let level = strAttr "level" el |> Option.map int
-
-        { Inlines = el.Elements() |> Seq.filter (fun c -> c.Name.LocalName <> "paragraphFormat") |> Seq.map inlineOfXml |> List.ofSeq
-          StyleId = strAttr "styleId" el
-          Format = el.Element(xn "paragraphFormat") |> Option.ofObj |> Option.map paragraphFormatOfXml
-          Numbering = match numId, level with
-                      | Some n, Some l -> Some(n, l)
-                      | _ -> None }
-
     let private tableStyleRefToXml (s: TableStyleRef) : XElement =
         XElement(
             xn "tableStyle",
@@ -379,7 +315,77 @@ module Xml =
           Borders = el.Element(xn "tableBorders") |> Option.ofObj |> Option.map tableBordersOfXml
           Width = strAttr "width" el |> Option.map float }
 
-    let rec private blockToXml (b: Block) : XElement =
+    // `inlineToXml`/`inlineOfXml` need `blockToXml`/`blockOfXml` (a `Footnote`/`Endnote`'s
+    // own body is a `Block list`), which need `paragraphToXml`/`paragraphOfXml`, which need
+    // `inlineToXml`/`inlineOfXml` back for a paragraph's own `Inlines` - one `rec ... and
+    // ...` chain for the same reason `Writer.fs`'s equivalent functions are chained.
+    let rec private inlineToXml (i: Inline) : XElement =
+        match i with
+        | Run(text, style, styleId) ->
+            XElement(xn "run", attrOpt "styleId" styleId, (style |> Option.map runStyleToXml |> Option.toList), text)
+        | LineBreak -> XElement(xn "lineBreak")
+        | Tab -> XElement(xn "tab")
+        | PageBreak -> XElement(xn "pageBreak")
+        | Image img -> imageToXml img
+        | Hyperlink(target, runs, tooltip) ->
+            XElement(xn "hyperlink", attrOpt "tooltip" tooltip, hyperlinkTargetToXml target, XElement(xn "content", runs |> List.map inlineToXml))
+        | Bookmark(name, content) -> XElement(xn "bookmark", attr "name" name, content |> List.map inlineToXml)
+        | Comment(author, initials, date, text, content) ->
+            XElement(
+                xn "comment",
+                attr "author" author,
+                attrOpt "initials" initials,
+                attrOpt "date" (date |> Option.map (fun d -> d.ToString("o"))),
+                XElement(xn "text", text),
+                XElement(xn "content", content |> List.map inlineToXml)
+            )
+        | Field(instr, cached) -> XElement(xn "field", attr "instruction" instr, attrOpt "cachedResult" cached)
+        | Footnote content -> XElement(xn "footnote", XElement(xn "body", content |> List.map blockToXml))
+        | Endnote content -> XElement(xn "endnote", XElement(xn "body", content |> List.map blockToXml))
+
+    and private inlineOfXml (el: XElement) : Inline =
+        match el.Name.LocalName with
+        | "run" -> Run(el.Value, el.Element(xn "runStyle") |> Option.ofObj |> Option.map runStyleOfXml, strAttr "styleId" el)
+        | "lineBreak" -> LineBreak
+        | "tab" -> Tab
+        | "pageBreak" -> PageBreak
+        | "image" -> Image(imageOfXml el)
+        | "hyperlink" ->
+            let target = el.Elements() |> Seq.find (fun c -> c.Name.LocalName = "externalHyperlink" || c.Name.LocalName = "internalHyperlink") |> hyperlinkTargetOfXml
+            let content = el.Element(xn "content").Elements() |> Seq.map inlineOfXml |> List.ofSeq
+            Hyperlink(target, content, strAttr "tooltip" el)
+        | "bookmark" -> Bookmark(el.Attribute(xn "name").Value, el.Elements() |> Seq.map inlineOfXml |> List.ofSeq)
+        | "comment" ->
+            let content = el.Element(xn "content").Elements() |> Seq.map inlineOfXml |> List.ofSeq
+            let text = el.Element(xn "text").Value
+            Comment(el.Attribute(xn "author").Value, strAttr "initials" el, strAttr "date" el |> Option.map DateTime.Parse, text, content)
+        | "field" -> Field(el.Attribute(xn "instruction").Value, strAttr "cachedResult" el)
+        | "footnote" -> Footnote(el.Element(xn "body").Elements() |> Seq.map blockOfXml |> List.ofSeq)
+        | "endnote" -> Endnote(el.Element(xn "body").Elements() |> Seq.map blockOfXml |> List.ofSeq)
+        | other -> failwithf "Unknown inline element: %s" other
+
+    and private paragraphToXml (p: Paragraph) : XElement =
+        XElement(
+            xn "para",
+            attrOpt "styleId" p.StyleId,
+            attrOpt "numId" (p.Numbering |> Option.map fst),
+            attrOpt "level" (p.Numbering |> Option.map snd),
+            (p.Format |> Option.map paragraphFormatToXml |> Option.toList),
+            p.Inlines |> List.map inlineToXml
+        )
+
+    and private paragraphOfXml (el: XElement) : Paragraph =
+        let numId = strAttr "numId" el |> Option.map int
+        let level = strAttr "level" el |> Option.map int
+
+        { Inlines = el.Elements() |> Seq.filter (fun c -> c.Name.LocalName <> "paragraphFormat") |> Seq.map inlineOfXml |> List.ofSeq
+          StyleId = strAttr "styleId" el
+          Format = el.Element(xn "paragraphFormat") |> Option.ofObj |> Option.map paragraphFormatOfXml
+          Numbering = match numId, level with
+                      | Some n, Some l -> Some(n, l)
+                      | _ -> None }
+
+    and private blockToXml (b: Block) : XElement =
         match b with
         | ParagraphBlock p -> paragraphToXml p
         | TableBlock t -> tableToXml t
@@ -463,11 +469,19 @@ module Xml =
             attr "orientation" (sprintf "%A" s.Orientation),
             attrOpt "pageNumberStart" s.PageNumberStart,
             attr "columns" s.Columns,
+            attr "breakType" (sprintf "%A" s.BreakType),
             pageSizeToXml s.PageSize,
             pageMarginsToXml s.Margins,
             (s.Header |> Option.map (headerFooterSetToXml "header") |> Option.toList),
             (s.Footer |> Option.map (headerFooterSetToXml "footer") |> Option.toList)
         )
+
+    let private sectionBreakTypeOfXml (s: string option) : SectionBreakType =
+        match s with
+        | Some "ContinuousBreak" -> ContinuousBreak
+        | Some "EvenPageBreak" -> EvenPageBreak
+        | Some "OddPageBreak" -> OddPageBreak
+        | _ -> NextPageBreak
 
     let private sectionPropertiesOfXml (el: XElement) : SectionProperties =
         { PageSize = pageSizeOfXml (el.Element(xn "pageSize"))
@@ -476,7 +490,8 @@ module Xml =
           Header = el.Element(xn "header") |> Option.ofObj |> Option.map headerFooterSetOfXml
           Footer = el.Element(xn "footer") |> Option.ofObj |> Option.map headerFooterSetOfXml
           PageNumberStart = strAttr "pageNumberStart" el |> Option.map int
-          Columns = int (el.Attribute(xn "columns").Value) }
+          Columns = int (el.Attribute(xn "columns").Value)
+          BreakType = sectionBreakTypeOfXml (strAttr "breakType" el) }
 
     let private sectionToXml (s: Section) : XElement =
         XElement(xn "section", sectionPropertiesToXml s.Properties, XElement(xn "body", s.Body |> List.map blockToXml))

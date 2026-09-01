@@ -2,7 +2,7 @@
 <document>
   <sections>
     <section>
-      <pageSetup orientation="Portrait" columns="1">
+      <pageSetup orientation="Portrait" columns="1" breakType="NextPageBreak">
         <pageSize kind="Letter" />
         <margins top="72" bottom="72" left="72" right="72" header="36" footer="36" gutter="0" />
       </pageSetup>
@@ -40,6 +40,18 @@
     </style>
     <style id="Hyperlink" name="Hyperlink" type="character">
       <runStyle underline="single" color="0563C1" />
+    </style>
+    <style id="FootnoteReference" name="footnote reference" type="character">
+      <runStyle verticalPosition="superscript" />
+    </style>
+    <style id="EndnoteReference" name="endnote reference" type="character">
+      <runStyle verticalPosition="superscript" />
+    </style>
+    <style id="FootnoteText" name="footnote text" type="paragraph" basedOn="Normal">
+      <runStyle size="10" />
+    </style>
+    <style id="EndnoteText" name="endnote text" type="paragraph" basedOn="Normal">
+      <runStyle size="10" />
     </style>
   </styles>
   <protection edit="ReadOnlyRestriction" password="hunter2" />

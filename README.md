@@ -44,15 +44,15 @@ reasoning and what adding either would look like.
   - `Hyperlinks.fs` - `HyperlinkTarget` (external URL vs. internal bookmark reference).
   - `Protection.fs` - `EditRestriction` and `DocumentProtection`, document-level (Word has
     no per-section equivalent of Excel's per-sheet protection).
-  - `PageSetup.fs` - `PageOrientation`, `PageSize`, `PageMargins`.
+  - `PageSetup.fs` - `PageOrientation`, `PageSize`, `PageMargins`, `SectionBreakType`.
   - `Tables.fs` - `TableBorders`, `VerticalMergeKind`, `TableCellProps`, `TableStyleRef`.
   - `Images.fs` - `ImageFormat`, `ImageEntry` (raw file bytes plus an on-page size),
     anchored inline within a run.
   - `Model.fs` - the recursive content model: `Inline` (runs, breaks, images, hyperlinks,
-    bookmarks, comments, simple fields), `Paragraph`, `Block` (paragraph or table),
-    `TableCell`/`TableRow`/`TableEntry`, `HeaderFooterSet`, `SectionProperties`, `Section`,
-    `Document` (including `Document.VbaProject`, a macro-enabled document's raw
-    `vbaProject.bin` bytes).
+    bookmarks, comments, simple fields, footnotes/endnotes), `Paragraph`, `Block`
+    (paragraph or table), `TableCell`/`TableRow`/`TableEntry`, `HeaderFooterSet`,
+    `SectionProperties` (including `BreakType`), `Section`, `Document` (including
+    `Document.VbaProject`, a macro-enabled document's raw `vbaProject.bin` bytes).
   - `Xml.fs` / `Xml.xsd` - the XML surface: `Xml.toDocument`/`Xml.ofDocument` translate a
     `Document` to/from an `XElement` tree, and `Xml.schemaSet()` loads the paired schema
     (embedded in the assembly as a resource) for validating either direction. See
@@ -63,8 +63,8 @@ reasoning and what adding either would look like.
   - `Builders.fs` - plain functional constructors (`section`, `document`, `withStyles`,
     `withNumbering`, `withProtection`, `withVbaProject`, `bulletListDef`,
     `numberedListDef`) plus `DocumentDsl` - smart constructors (`run`, `para`, `hyperlink`,
-    `bookmark`, `comment`, `image`, `tableCell`, `tableRow`, `table`) with real optional
-    parameters, the Word analog of the Excel repo's `SheetDsl`.
+    `bookmark`, `comment`, `image`, `footnote`, `endnote`, `tableCell`, `tableRow`, `table`)
+    with real optional parameters, the Word analog of the Excel repo's `SheetDsl`.
   - `Interpreter/StyleRegistry.fs` - shared run/paragraph/border/color conversions plus
     `Document.Styles` <-> `styles.xml` (internal).
   - `Interpreter/ImageWriter.fs` / `ImageReader.fs` - an inline image's own DSL <->
@@ -159,11 +159,29 @@ tableCell ([ para [ run "Spans 2 columns" ] ], props = { TableCellProps.Default 
 ```
 
 Sections carry their own page setup - a document is a sequence of `Section`s, mapping 1:1
-onto real Word section breaks:
+onto real Word section breaks. `BreakType` is how a section begins *relative to the
+previous one* - meaningless (and not written) on the very first section:
 
 ```fsharp
 let landscape = { SectionProperties.Default with Orientation = Landscape }
 document [ sectionWith landscape [ para [ run "A landscape-oriented page." ] ] ]
+
+let continuous = { SectionProperties.Default with BreakType = ContinuousBreak }
+document
+    [ section [ para [ run "Section 1." ] ]
+      sectionWith continuous [ para [ run "Section 2 - no page break from section 1." ] ] ]
+```
+
+Footnotes and endnotes mark a point in a paragraph's own `Inlines` - `content` is the
+note's own body, written to `word/footnotes.xml`/`endnotes.xml` with an id `Writer` assigns
+automatically (the reference-mark run itself is generated for you, on both ends):
+
+```fsharp
+para
+    [ run "This claim needs a citation"
+      footnote "Smith, J. (2023). A Study of Claims."
+      run ", and this one refers to a fuller discussion"
+      endnote [ para [ run "See the appendix for the full derivation." ] ] ]
 ```
 
 Headers and footers are per-section, with `Default`/`First`/`Even` variants (the

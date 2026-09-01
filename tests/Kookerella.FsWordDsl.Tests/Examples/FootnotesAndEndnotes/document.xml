@@ -8,22 +8,32 @@
       </pageSetup>
       <body>
         <para>
-          <run>Plain text, </run>
-          <run>
-            <runStyle bold="true" />bold</run>
-          <run>, </run>
-          <run>
-            <runStyle italic="true" />italic</run>
-          <run>, and </run>
-          <run>
-            <runStyle color="FF0000" />colored</run>
+          <run>This claim needs a citation</run>
+          <footnote>
+            <body>
+              <para styleId="FootnoteText">
+                <run>Smith, J. (2023). A Study of Claims. Journal of Claims, 12(3), 45-67.</run>
+              </para>
+            </body>
+          </footnote>
+          <run>, and this one refers to a fuller discussion</run>
+          <endnote>
+            <body>
+              <para>
+                <run>See the appendix for the full derivation and worked examples.</run>
+              </para>
+            </body>
+          </endnote>
         </para>
         <para>
-          <run>
-            <runStyle underline="single" />Underlined</run>
-          <run> and </run>
-          <run>
-            <runStyle strikethrough="true" />struck through</run>
+          <run>A second footnote in a later paragraph, to check id numbering isn't reset per paragraph.</run>
+          <footnote>
+            <body>
+              <para styleId="FootnoteText">
+                <run>A second note.</run>
+              </para>
+            </body>
+          </footnote>
         </para>
       </body>
     </section>

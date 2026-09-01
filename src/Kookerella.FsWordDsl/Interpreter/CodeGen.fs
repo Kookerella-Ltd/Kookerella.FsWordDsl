@@ -146,8 +146,15 @@ module CodeGen =
             let dateStr = renderOption (fun (d: System.DateTime) -> sprintf "System.DateTime.Parse(%s)" (quote (d.ToString("o")))) date
             sprintf "Comment(%s, %s, %s, %s, %s)" (quote author) (renderOption quote initials) dateStr (quote text) (renderList renderInline content)
         | Field(instr, cached) -> sprintf "Field(%s, %s)" (quote instr) (renderOption quote cached)
+        | Footnote content -> sprintf "Footnote(%s)" (renderList renderBlock content)
+        | Endnote content -> sprintf "Endnote(%s)" (renderList renderBlock content)
 
-    let private renderParagraph (p: Paragraph) : string =
+    // Continues the same `rec ... and ...` chain `renderInline` above started - `Footnote`/
+    // `Endnote` need `renderBlock`, which needs `renderParagraph`, which needs
+    // `renderInline` for its own `Inlines`, same cycle `Writer.fs`'s own equivalent chain
+    // note describes.
+
+    and private renderParagraph (p: Paragraph) : string =
         sprintf
             "{ Inlines = %s; StyleId = %s; Format = %s; Numbering = %s }"
             (renderList renderInline p.Inlines)
@@ -155,7 +162,7 @@ module CodeGen =
             (renderOption renderParagraphFormat p.Format)
             (renderOption (renderTuple2 string string) p.Numbering)
 
-    let rec private renderBlock (b: Block) : string =
+    and private renderBlock (b: Block) : string =
         match b with
         | ParagraphBlock p -> sprintf "ParagraphBlock(%s)" (renderParagraph p)
         | TableBlock t -> sprintf "TableBlock(%s)" (renderTableEntry t)
@@ -209,7 +216,7 @@ module CodeGen =
 
     let private renderSectionProperties (s: SectionProperties) : string =
         sprintf
-            "{ PageSize = %s; Orientation = %A; Margins = %s; Header = %s; Footer = %s; PageNumberStart = %s; Columns = %d }"
+            "{ PageSize = %s; Orientation = %A; Margins = %s; Header = %s; Footer = %s; PageNumberStart = %s; Columns = %d; BreakType = %A }"
             (renderPageSize s.PageSize)
             s.Orientation
             (renderPageMargins s.Margins)
@@ -217,6 +224,7 @@ module CodeGen =
             (renderOption renderHeaderFooterSet s.Footer)
             (renderOption string s.PageNumberStart)
             s.Columns
+            s.BreakType
 
     let private renderSection (s: Section) : string =
         sprintf "{ Body = %s; Properties = %s }" (renderList renderBlock s.Body) (renderSectionProperties s.Properties)

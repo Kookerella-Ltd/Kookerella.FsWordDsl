@@ -299,6 +299,20 @@ let ``Comments`` () =
     verifyScenarioNamed "Comments" "output.docx" doc
 
 [<Fact>]
+let ``FootnotesAndEndnotes`` () =
+    let doc =
+        document
+            [ section
+                  [ para
+                        [ run "This claim needs a citation"
+                          footnote "Smith, J. (2023). A Study of Claims. Journal of Claims, 12(3), 45-67."
+                          run ", and this one refers to a fuller discussion"
+                          endnote [ para [ run "See the appendix for the full derivation and worked examples." ] ] ]
+                    para [ run "A second footnote in a later paragraph, to check id numbering isn't reset per paragraph."; footnote "A second note." ] ] ]
+
+    verifyScenarioNamed "FootnotesAndEndnotes" "output.docx" doc
+
+[<Fact>]
 let ``PageSetupLandscape`` () =
     let props =
         { SectionProperties.Default with
@@ -336,9 +350,22 @@ let ``HeaderFooterFirstPageDifferent`` () =
 
 [<Fact>]
 let ``MultipleSections`` () =
+    // `BreakType` describes how a section begins relative to the PREVIOUS one, so it's
+    // meaningless (and not written) on the very first section - sec2/sec3 each show a
+    // different real break type.
     let sec1 = sectionWith { SectionProperties.Default with Orientation = Portrait } [ para [ run "Section 1 - portrait." ] ]
-    let sec2 = sectionWith { SectionProperties.Default with Orientation = Landscape } [ para [ run "Section 2 - landscape." ] ]
-    let doc = document [ sec1; sec2 ]
+
+    let sec2 =
+        sectionWith
+            { SectionProperties.Default with Orientation = Landscape; BreakType = ContinuousBreak }
+            [ para [ run "Section 2 - landscape, continuous break (no page break from section 1)." ] ]
+
+    let sec3 =
+        sectionWith
+            { SectionProperties.Default with Orientation = Portrait; BreakType = OddPageBreak }
+            [ para [ run "Section 3 - portrait again, starts on the next odd page." ] ]
+
+    let doc = document [ sec1; sec2; sec3 ]
     verifyScenarioNamed "MultipleSections" "output.docx" doc
 
 [<Fact>]
@@ -380,6 +407,7 @@ let ``Macro`` () =
 [<InlineData("Bookmark")>]
 [<InlineData("Hyperlink_Internal")>]
 [<InlineData("Comments")>]
+[<InlineData("FootnotesAndEndnotes")>]
 [<InlineData("PageSetupLandscape")>]
 [<InlineData("HeaderFooterDefault")>]
 [<InlineData("HeaderFooterFirstPageDifferent")>]

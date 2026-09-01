@@ -15,6 +15,16 @@ module Reader =
 
     let private opt (x: 'a when 'a: null) : 'a option = if obj.ReferenceEquals(x, null) then None else Some x
 
+    /// Shared read-time lookups, threaded through the same functions that used to thread a
+    /// bare `commentsById` map alone - `FootnotesById`/`EndnotesById` key a note's already-
+    /// parsed `Block list` body by its `w:id`, built once in `readDocument` before the body
+    /// itself is read (see that function's own note on why note bodies get an empty-notes
+    /// bootstrap `rctx` rather than needing this to be lazy/two-pass).
+    type private ReadCtx =
+        { CommentsById: Map<string, Wordprocessing.Comment>
+          FootnotesById: Map<int, Block list>
+          EndnotesById: Map<int, Block list> }
+
     // --- Numbering --------------------------------------------------------------------------
 
     let private numberFormatKindOfW (v: Wordprocessing.NumberFormatValues) : NumberFormatKind =
@@ -126,7 +136,7 @@ module Reader =
         (startIdx: int)
         (endIdxExclusive: int)
         (mainPart: MainDocumentPart)
-        (commentsById: Map<string, Wordprocessing.Comment>)
+        (rctx: ReadCtx)
         : Inline list =
         let result = ResizeArray<Inline>()
         let mutable i = startIdx
@@ -146,7 +156,7 @@ module Reader =
 
                 match endIdx with
                 | Some endIdx ->
-                    let content = parseInlineRange elements (i + 1) endIdx mainPart commentsById
+                    let content = parseInlineRange elements (i + 1) endIdx mainPart rctx
                     result.Add(Bookmark(name, content))
                     i <- endIdx + 1
                 | None -> i <- i + 1
@@ -162,7 +172,7 @@ module Reader =
 
                 match endIdx with
                 | Some endIdx ->
-                    let content = parseInlineRange elements (i + 1) endIdx mainPart commentsById
+                    let content = parseInlineRange elements (i + 1) endIdx mainPart rctx
                     let afterEnd = endIdx + 1
 
                     let refConsumed =
@@ -171,7 +181,7 @@ module Reader =
                             | :? Wordprocessing.Run as r -> r.Elements<Wordprocessing.CommentReference>() |> Seq.exists (fun cr -> cr.Id.Value = id)
                             | _ -> false)
 
-                    let meta = commentsById.TryFind id
+                    let meta = rctx.CommentsById.TryFind id
                     let author = meta |> Option.map (fun c -> c.Author.Value) |> Option.defaultValue ""
                     let initials = meta |> Option.bind (fun c -> c.Initials |> opt) |> Option.map (fun v -> v.Value)
                     let date = meta |> Option.bind (fun c -> c.Date |> opt) |> Option.map (fun v -> v.Value)
@@ -181,7 +191,7 @@ module Reader =
                 | None -> i <- i + 1
             | :? Wordprocessing.Hyperlink as hl ->
                 let children = hl.ChildElements |> Seq.cast<OpenXmlElement> |> Array.ofSeq
-                let innerInlines = parseInlineRange children 0 children.Length mainPart commentsById
+                let innerInlines = parseInlineRange children 0 children.Length mainPart rctx
                 let tooltip = hl.Tooltip |> opt |> Option.map (fun v -> v.Value)
 
                 let target =
@@ -198,12 +208,18 @@ module Reader =
                 result.Add(Hyperlink(target, innerInlines, tooltip))
                 i <- i + 1
             | :? Wordprocessing.Run as r ->
-                result.AddRange(readRunInlines r)
+                let footnoteRef = r.Elements<Wordprocessing.FootnoteReference>() |> Seq.tryHead
+                let endnoteRef = r.Elements<Wordprocessing.EndnoteReference>() |> Seq.tryHead
 
-                match r.Descendants<Wordprocessing.Drawing>() |> Seq.tryHead with
-                | Some drawing ->
-                    tryReadImage mainPart drawing |> Option.iter (fun img -> result.Add(Image img))
-                | None -> ()
+                match footnoteRef, endnoteRef with
+                | Some fr, _ -> rctx.FootnotesById.TryFind(int fr.Id.Value) |> Option.iter (fun content -> result.Add(Footnote content))
+                | _, Some er -> rctx.EndnotesById.TryFind(int er.Id.Value) |> Option.iter (fun content -> result.Add(Endnote content))
+                | None, None ->
+                    result.AddRange(readRunInlines r)
+
+                    match r.Descendants<Wordprocessing.Drawing>() |> Seq.tryHead with
+                    | Some drawing -> tryReadImage mainPart drawing |> Option.iter (fun img -> result.Add(Image img))
+                    | None -> ()
 
                 i <- i + 1
             | :? Wordprocessing.SimpleField as sf ->
@@ -217,7 +233,7 @@ module Reader =
 
     // --- Paragraphs / tables -----------------------------------------------------------------
 
-    let private readParagraph (mainPart: MainDocumentPart) (commentsById: Map<string, Wordprocessing.Comment>) (p: Wordprocessing.Paragraph) : Paragraph =
+    let private readParagraph (mainPart: MainDocumentPart) (rctx: ReadCtx) (p: Wordprocessing.Paragraph) : Paragraph =
         let pPr = p.ParagraphProperties |> opt
         let styleId = styleIdOfParagraphProperties pPr
         let format = paragraphFormatOfProperties pPr
@@ -235,7 +251,7 @@ module Reader =
             |> Seq.filter (fun c -> not (c :? Wordprocessing.ParagraphProperties))
             |> Array.ofSeq
 
-        { Inlines = parseInlineRange elements 0 elements.Length mainPart commentsById
+        { Inlines = parseInlineRange elements 0 elements.Length mainPart rctx
           StyleId = styleId
           Format = format
           Numbering = numbering }
@@ -295,13 +311,13 @@ module Reader =
               InsideHorizontal = tb.InsideHorizontalBorder |> opt |> Option.map borderSideOfInsideH
               InsideVertical = tb.InsideVerticalBorder |> opt |> Option.map borderSideOfInsideV })
 
-    let rec private readBlock (mainPart: MainDocumentPart) (commentsById: Map<string, Wordprocessing.Comment>) (el: OpenXmlElement) : Block =
+    let rec private readBlock (mainPart: MainDocumentPart) (rctx: ReadCtx) (el: OpenXmlElement) : Block =
         match el with
-        | :? Wordprocessing.Paragraph as p -> ParagraphBlock(readParagraph mainPart commentsById p)
-        | :? Wordprocessing.Table as t -> TableBlock(readTable mainPart commentsById t)
+        | :? Wordprocessing.Paragraph as p -> ParagraphBlock(readParagraph mainPart rctx p)
+        | :? Wordprocessing.Table as t -> TableBlock(readTable mainPart rctx t)
         | other -> failwithf "Unexpected body element: %s" (other.GetType().Name)
 
-    and private readTable (mainPart: MainDocumentPart) (commentsById: Map<string, Wordprocessing.Comment>) (t: Wordprocessing.Table) : TableEntry =
+    and private readTable (mainPart: MainDocumentPart) (rctx: ReadCtx) (t: Wordprocessing.Table) : TableEntry =
         let tblPr = t.GetFirstChild<Wordprocessing.TableProperties>() |> opt
         let grid = t.GetFirstChild<Wordprocessing.TableGrid>() |> opt
 
@@ -355,7 +371,7 @@ module Reader =
                         let content =
                             tc.ChildElements
                             |> Seq.filter (fun c -> not (c :? Wordprocessing.TableCellProperties))
-                            |> Seq.map (readBlock mainPart commentsById)
+                            |> Seq.map (readBlock mainPart rctx)
                             |> List.ofSeq
 
                         { Content = content; Props = props })
@@ -368,6 +384,27 @@ module Reader =
           ColumnWidths = widths
           Style = tableStyleRefOfW tblPr
           Borders = tableBordersOfW tblPr }
+
+    /// The inverse of `Writer.insertNoteMarker` - strips the note-reference-mark run
+    /// (`w:footnoteRef`/`w:endnoteRef`) back out of the body's first paragraph before
+    /// handing the rest to `readBlock` like any other content, so a caller reading a
+    /// `Footnote`/`Endnote`'s `content` back never sees the marker `Writer` added.
+    and private readNoteContent (mainPart: MainDocumentPart) (rctx: ReadCtx) (note: Wordprocessing.FootnoteEndnoteType) : Block list =
+        match note.ChildElements |> List.ofSeq with
+        | (:? Wordprocessing.Paragraph as firstPara) :: rest ->
+            let strippedChildren =
+                firstPara.ChildElements
+                |> Seq.filter (fun c ->
+                    match c with
+                    | :? Wordprocessing.Run as r ->
+                        (r.Descendants<Wordprocessing.FootnoteReferenceMark>() |> Seq.isEmpty)
+                        && (r.Descendants<Wordprocessing.EndnoteReferenceMark>() |> Seq.isEmpty)
+                    | _ -> true)
+                |> Seq.map (fun c -> c.CloneNode true)
+
+            let strippedPara = Wordprocessing.Paragraph(strippedChildren)
+            readBlock mainPart rctx strippedPara :: (rest |> List.map (readBlock mainPart rctx))
+        | other -> other |> List.map (readBlock mainPart rctx)
 
     // --- Page setup / headers & footers -------------------------------------------------------
 
@@ -405,14 +442,14 @@ module Reader =
               Footer = pm.Footer |> opt |> Option.map (fun v -> twipsToPoints (string v.Value)) |> Option.defaultValue 36.0
               Gutter = pm.Gutter |> opt |> Option.map (fun v -> twipsToPoints (string v.Value)) |> Option.defaultValue 0.0 }
 
-    let private readHeaderPart (mainPart: MainDocumentPart) (commentsById: Map<string, Wordprocessing.Comment>) (id: string) : Block list =
+    let private readHeaderPart (mainPart: MainDocumentPart) (rctx: ReadCtx) (id: string) : Block list =
         match mainPart.GetPartById(id) with
-        | :? HeaderPart as hp -> hp.Header.ChildElements |> Seq.map (readBlock mainPart commentsById) |> List.ofSeq
+        | :? HeaderPart as hp -> hp.Header.ChildElements |> Seq.map (readBlock mainPart rctx) |> List.ofSeq
         | _ -> []
 
-    let private readFooterPart (mainPart: MainDocumentPart) (commentsById: Map<string, Wordprocessing.Comment>) (id: string) : Block list =
+    let private readFooterPart (mainPart: MainDocumentPart) (rctx: ReadCtx) (id: string) : Block list =
         match mainPart.GetPartById(id) with
-        | :? FooterPart as fp -> fp.Footer.ChildElements |> Seq.map (readBlock mainPart commentsById) |> List.ofSeq
+        | :? FooterPart as fp -> fp.Footer.ChildElements |> Seq.map (readBlock mainPart rctx) |> List.ofSeq
         | _ -> []
 
     let private headerFooterSetOfRefs
@@ -429,7 +466,7 @@ module Reader =
                   First = find Wordprocessing.HeaderFooterValues.First
                   Even = find Wordprocessing.HeaderFooterValues.Even }
 
-    let private sectionPropertiesOfW (mainPart: MainDocumentPart) (commentsById: Map<string, Wordprocessing.Comment>) (sectPr: Wordprocessing.SectionProperties) : SectionProperties =
+    let private sectionPropertiesOfW (mainPart: MainDocumentPart) (rctx: ReadCtx) (sectPr: Wordprocessing.SectionProperties) : SectionProperties =
         let pageSize, orientation = pageSizeAndOrientationOfW (sectPr.GetFirstChild<Wordprocessing.PageSize>() |> opt)
         let margins = pageMarginsOfW (sectPr.GetFirstChild<Wordprocessing.PageMargin>() |> opt)
 
@@ -457,20 +494,32 @@ module Reader =
         let pageNumStart =
             sectPr.GetFirstChild<Wordprocessing.PageNumberType>() |> opt |> Option.bind (fun p -> p.Start |> opt) |> Option.map (fun v -> int v.Value)
 
+        let breakType =
+            sectPr.GetFirstChild<Wordprocessing.SectionType>()
+            |> opt
+            |> Option.bind (fun t -> t.Val |> opt)
+            |> Option.map (fun v ->
+                if v.Value = Wordprocessing.SectionMarkValues.Continuous then ContinuousBreak
+                elif v.Value = Wordprocessing.SectionMarkValues.EvenPage then EvenPageBreak
+                elif v.Value = Wordprocessing.SectionMarkValues.OddPage then OddPageBreak
+                else NextPageBreak)
+            |> Option.defaultValue NextPageBreak
+
         { PageSize = pageSize
           Orientation = orientation
           Margins = margins
-          Header = headerFooterSetOfRefs (readHeaderPart mainPart commentsById) headerRefs
-          Footer = headerFooterSetOfRefs (readFooterPart mainPart commentsById) footerRefs
+          Header = headerFooterSetOfRefs (readHeaderPart mainPart rctx) headerRefs
+          Footer = headerFooterSetOfRefs (readFooterPart mainPart rctx) footerRefs
           PageNumberStart = pageNumStart
-          Columns = columns }
+          Columns = columns
+          BreakType = breakType }
 
     // --- Sections -------------------------------------------------------------------------
 
     /// The inverse of `Writer.sectionsToBodyChildren` - splits the body's flat child list
     /// back into `Section`s at each embedded `<w:sectPr>` (paragraph-level or, for the last
     /// section, the body's own trailing one).
-    let private readSections (mainPart: MainDocumentPart) (commentsById: Map<string, Wordprocessing.Comment>) (body: Wordprocessing.Body) : Section list =
+    let private readSections (mainPart: MainDocumentPart) (rctx: ReadCtx) (body: Wordprocessing.Body) : Section list =
         let children = body.ChildElements |> Array.ofSeq
         let sections = ResizeArray<Section>()
         let currentBlocks = ResizeArray<OpenXmlElement>()
@@ -478,8 +527,8 @@ module Reader =
         for child in children do
             match child with
             | :? Wordprocessing.SectionProperties as sectPr ->
-                let blocks = currentBlocks |> Seq.map (readBlock mainPart commentsById) |> List.ofSeq
-                sections.Add({ Body = blocks; Properties = sectionPropertiesOfW mainPart commentsById sectPr })
+                let blocks = currentBlocks |> Seq.map (readBlock mainPart rctx) |> List.ofSeq
+                sections.Add({ Body = blocks; Properties = sectionPropertiesOfW mainPart rctx sectPr })
                 currentBlocks.Clear()
             | :? Wordprocessing.Paragraph as p when not (isNull p.ParagraphProperties) && not (isNull p.ParagraphProperties.SectionProperties) ->
                 let sectPr = p.ParagraphProperties.SectionProperties
@@ -490,15 +539,15 @@ module Reader =
                     strippedPara.PrependChild(strippedPPr) |> ignore
 
                 currentBlocks.Add(strippedPara)
-                let blocks = currentBlocks |> Seq.map (readBlock mainPart commentsById) |> List.ofSeq
-                sections.Add({ Body = blocks; Properties = sectionPropertiesOfW mainPart commentsById sectPr })
+                let blocks = currentBlocks |> Seq.map (readBlock mainPart rctx) |> List.ofSeq
+                sections.Add({ Body = blocks; Properties = sectionPropertiesOfW mainPart rctx sectPr })
                 currentBlocks.Clear()
             | other -> currentBlocks.Add(other)
 
         if currentBlocks.Count > 0 then
             // No trailing body-level sectPr (malformed/foreign file) - treat remaining
             // content as one final section with default page setup rather than dropping it.
-            let blocks = currentBlocks |> Seq.map (readBlock mainPart commentsById) |> List.ofSeq
+            let blocks = currentBlocks |> Seq.map (readBlock mainPart rctx) |> List.ofSeq
             sections.Add({ Body = blocks; Properties = SectionProperties.Default })
 
         sections |> List.ofSeq
@@ -533,6 +582,36 @@ module Reader =
             |> Option.map (fun cs -> cs.Elements<Wordprocessing.Comment>() |> Seq.map (fun c -> c.Id.Value, c) |> Map.ofSeq)
             |> Option.defaultValue Map.empty
 
+        // Note bodies never contain a *nested* footnote/endnote reference (not a real Word
+        // feature) - only `CommentsById` needs to be real when reading them, so this
+        // bootstraps with empty note maps rather than needing a two-pass/lazy `rctx`.
+        let noteReadCtx = { CommentsById = commentsById; FootnotesById = Map.empty; EndnotesById = Map.empty }
+
+        let readNormalNotes (elements: Wordprocessing.FootnoteEndnoteType seq) =
+            elements
+            |> Seq.filter (fun n -> n.Type |> opt |> Option.map (fun v -> v.Value = Wordprocessing.FootnoteEndnoteValues.Normal) |> Option.defaultValue true)
+            |> Seq.map (fun n -> int n.Id.Value, readNoteContent mainPart noteReadCtx n)
+            |> Map.ofSeq
+
+        let footnotesById =
+            mainPart.FootnotesPart
+            |> opt
+            |> Option.bind (fun p -> p.Footnotes |> opt)
+            |> Option.map (fun fns -> readNormalNotes (fns.Elements<Wordprocessing.Footnote>() |> Seq.cast<Wordprocessing.FootnoteEndnoteType>))
+            |> Option.defaultValue Map.empty
+
+        let endnotesById =
+            mainPart.EndnotesPart
+            |> opt
+            |> Option.bind (fun p -> p.Endnotes |> opt)
+            |> Option.map (fun ens -> readNormalNotes (ens.Elements<Wordprocessing.Endnote>() |> Seq.cast<Wordprocessing.FootnoteEndnoteType>))
+            |> Option.defaultValue Map.empty
+
+        let rctx =
+            { CommentsById = commentsById
+              FootnotesById = footnotesById
+              EndnotesById = endnotesById }
+
         let styles = stylesOfOpenXml (mainPart.StyleDefinitionsPart |> opt |> Option.bind (fun p -> p.Styles |> opt))
         let numbering = numberingOfW (mainPart.NumberingDefinitionsPart |> opt |> Option.bind (fun p -> p.Numbering |> opt))
         let protection = documentProtectionOfW (mainPart.DocumentSettingsPart |> opt |> Option.bind (fun p -> p.Settings |> opt))
@@ -546,7 +625,7 @@ module Reader =
                 stream.CopyTo(mem)
                 mem.ToArray())
 
-        { Sections = readSections mainPart commentsById mainPart.Document.Body
+        { Sections = readSections mainPart rctx mainPart.Document.Body
           Styles = styles
           Numbering = numbering
           Protection = protection
