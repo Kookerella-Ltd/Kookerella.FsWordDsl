@@ -10,7 +10,18 @@
       <xs:element name="numbering" type="numberingType" minOccurs="0" />
       <xs:element name="protection" type="protectionType" minOccurs="0" />
       <xs:element name="vbaProject" type="xs:base64Binary" minOccurs="0" />
+      <xs:element name="properties" type="documentPropertiesType" minOccurs="0" />
     </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="documentPropertiesType">
+    <xs:attribute name="title" type="xs:string" />
+    <xs:attribute name="author" type="xs:string" />
+    <xs:attribute name="subject" type="xs:string" />
+    <xs:attribute name="keywords" type="xs:string" />
+    <xs:attribute name="comments" type="xs:string" />
+    <xs:attribute name="category" type="xs:string" />
+    <xs:attribute name="company" type="xs:string" />
   </xs:complexType>
 
   <xs:complexType name="sectionsType">
@@ -186,18 +197,32 @@
     <xs:attribute name="color" type="xs:string" />
     <xs:attribute name="highlight" type="xs:string" />
     <xs:attribute name="verticalPosition" type="xs:string" />
+    <xs:attribute name="smallCaps" type="xs:boolean" />
+    <xs:attribute name="allCaps" type="xs:boolean" />
+    <xs:attribute name="hidden" type="xs:boolean" />
   </xs:complexType>
 
   <xs:complexType name="paragraphFormatType">
     <xs:sequence>
       <xs:element name="lineSpacing" type="lineSpacingType" minOccurs="0" />
       <xs:element name="indentation" type="indentationType" minOccurs="0" />
+      <xs:element name="borders" type="paragraphBordersType" minOccurs="0" />
     </xs:sequence>
     <xs:attribute name="alignment" type="xs:string" />
     <xs:attribute name="spacingBefore" type="xs:double" />
     <xs:attribute name="spacingAfter" type="xs:double" />
     <xs:attribute name="keepWithNext" type="xs:boolean" />
     <xs:attribute name="pageBreakBefore" type="xs:boolean" />
+    <xs:attribute name="shading" type="xs:string" />
+  </xs:complexType>
+
+  <xs:complexType name="paragraphBordersType">
+    <xs:sequence>
+      <xs:element name="left" type="borderSideType" minOccurs="0" />
+      <xs:element name="right" type="borderSideType" minOccurs="0" />
+      <xs:element name="top" type="borderSideType" minOccurs="0" />
+      <xs:element name="bottom" type="borderSideType" minOccurs="0" />
+    </xs:sequence>
   </xs:complexType>
 
   <xs:complexType name="lineSpacingType">

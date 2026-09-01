@@ -68,6 +68,8 @@ let private verifyScenarioNamed (name: string) (fileName: string) (doc: Document
     // reference, so this is a genuine byte-for-byte comparison of the VBA project.
     Assert.Equal<byte[] option>(doc.VbaProject, roundTripped.VbaProject)
 
+    Assert.Equal<DocumentProperties>(doc.Properties, roundTripped.Properties)
+
     let script = Document.generateScript codeGenReferenceLines fileName doc
     File.WriteAllText(Path.Combine(dir, "script.fsx"), script)
 
@@ -103,7 +105,13 @@ let ``BasicParagraphsAndRuns`` () =
                     para
                         [ run ("Underlined", style = { RunStyle.Default with Underline = Some SingleUnderline })
                           run " and "
-                          run ("struck through", style = { RunStyle.Default with Strikethrough = true }) ] ] ]
+                          run ("struck through", style = { RunStyle.Default with Strikethrough = true }) ]
+                    para
+                        [ run ("SMALL CAPS", style = { RunStyle.Default with SmallCaps = true })
+                          run " and "
+                          run ("ALL CAPS", style = { RunStyle.Default with AllCaps = true })
+                          run " and "
+                          run ("hidden text", style = { RunStyle.Default with Hidden = true }) ] ] ]
 
     verifyScenarioNamed "BasicParagraphsAndRuns" "output.docx" doc
 
@@ -131,11 +139,21 @@ let ``ParagraphFormatting`` () =
             Indentation = Some { Indentation.None with Left = Some 36.0 }
             LineSpacing = Some DoubleSpacing }
 
+    let bordered =
+        { ParagraphFormat.Default with
+            Borders =
+                Some
+                    { BorderStyle.None with
+                        Top = Some { Style = SingleLine; Width = Some 1.0; Color = Some Color.black }
+                        Bottom = Some { Style = SingleLine; Width = Some 1.0; Color = Some Color.black } }
+            Shading = Some(Rgb(0xD9uy, 0xD9uy, 0xD9uy)) }
+
     let doc =
         document
             [ section
                   [ para ([ run "Centered heading-like text." ], format = centered)
-                    para ([ run "An indented, double-spaced paragraph." ], format = indented) ] ]
+                    para ([ run "An indented, double-spaced paragraph." ], format = indented)
+                    para ([ run "A paragraph with top/bottom borders and shading." ], format = bordered) ] ]
 
     verifyScenarioNamed "ParagraphFormatting" "output.docx" doc
 
@@ -389,6 +407,21 @@ let ``Macro`` () =
 
     verifyScenarioNamed "Macro" "output.docm" doc
 
+[<Fact>]
+let ``DocumentProperties`` () =
+    let doc =
+        document [ section [ para [ run "A document with core metadata set." ] ] ]
+        |> withDocumentProperties
+            { Title = Some "Quarterly Report"
+              Author = Some "Kookerella"
+              Subject = Some "Q3 Results"
+              Keywords = Some "finance, quarterly, report"
+              Comments = Some "Draft for review"
+              Category = Some "Reports"
+              Company = Some "Kookerella Ltd" }
+
+    verifyScenarioNamed "DocumentProperties" "output.docx" doc
+
 // --- Slow: actually execute every generated script.fsx and verify it reproduces the
 // committed example ------------------------------------------------------------------
 
@@ -414,6 +447,7 @@ let ``Macro`` () =
 [<InlineData("MultipleSections")>]
 [<InlineData("DocumentProtectionReadOnly")>]
 [<InlineData("Macro")>]
+[<InlineData("DocumentProperties")>]
 let ``Regenerated script reproduces the example`` (name: string) =
     let dir = Path.Combine(examplesDir, name)
     let scriptPath = Path.Combine(dir, "script.fsx")

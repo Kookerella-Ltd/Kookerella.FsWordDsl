@@ -25,10 +25,15 @@ module Builders =
           Styles = BuiltInStyles.all
           Numbering = []
           Protection = None
-          VbaProject = None }
+          VbaProject = None
+          Properties = DocumentProperties.Default }
 
     /// Pipe-friendly, mirroring Excel's own `withDefinedNames`/`withProtection`.
     let withStyles (styles: StyleDefinition list) (doc: Document) : Document = { doc with Styles = styles }
+
+    /// Title/Author/etc. - `Writer` only touches `docProps/core.xml`/`app.xml` at all when
+    /// at least one field here is set, see `DocumentProperties`'s own doc comment.
+    let withDocumentProperties (properties: DocumentProperties) (doc: Document) : Document = { doc with Properties = properties }
 
     let withNumbering (definitions: NumberingDefinition list) (doc: Document) : Document = { doc with Numbering = definitions }
 

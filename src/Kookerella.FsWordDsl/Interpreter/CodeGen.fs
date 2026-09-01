@@ -46,7 +46,7 @@ module CodeGen =
 
     let private renderRunStyle (s: RunStyle) : string =
         sprintf
-            "{ RunStyle.Default with FontFamily = %s; Size = %s; Bold = %b; Italic = %b; Underline = %s; Strikethrough = %b; Color = %s; Highlight = %s; VerticalPosition = %s }"
+            "{ RunStyle.Default with FontFamily = %s; Size = %s; Bold = %b; Italic = %b; Underline = %s; Strikethrough = %b; Color = %s; Highlight = %s; VerticalPosition = %s; SmallCaps = %b; AllCaps = %b; Hidden = %b }"
             (renderOption quote s.FontFamily)
             (renderOption string s.Size)
             s.Bold
@@ -56,6 +56,9 @@ module CodeGen =
             (renderOption renderColor s.Color)
             (renderOption renderHighlight s.Highlight)
             (renderOption renderVerticalPosition s.VerticalPosition)
+            s.SmallCaps
+            s.AllCaps
+            s.Hidden
 
     let private renderIndentation (i: Indentation) : string =
         sprintf
@@ -72,17 +75,6 @@ module CodeGen =
         | MultipleSpacing f -> sprintf "MultipleSpacing %g" f
         | other -> sprintf "%A" other
 
-    let private renderParagraphFormat (f: ParagraphFormat) : string =
-        sprintf
-            "{ ParagraphFormat.Default with Alignment = %s; SpacingBefore = %s; SpacingAfter = %s; LineSpacing = %s; Indentation = %s; KeepWithNext = %b; PageBreakBefore = %b }"
-            (renderOption (sprintf "%A") f.Alignment)
-            (renderOption string f.SpacingBefore)
-            (renderOption string f.SpacingAfter)
-            (renderOption renderLineSpacing f.LineSpacing)
-            (renderOption renderIndentation f.Indentation)
-            f.KeepWithNext
-            f.PageBreakBefore
-
     let private renderBorderSide (s: BorderSide) : string =
         let style =
             match s.Style with
@@ -98,6 +90,19 @@ module CodeGen =
             (renderOption renderBorderSide b.Right)
             (renderOption renderBorderSide b.Top)
             (renderOption renderBorderSide b.Bottom)
+
+    let private renderParagraphFormat (f: ParagraphFormat) : string =
+        sprintf
+            "{ ParagraphFormat.Default with Alignment = %s; SpacingBefore = %s; SpacingAfter = %s; LineSpacing = %s; Indentation = %s; KeepWithNext = %b; PageBreakBefore = %b; Borders = %s; Shading = %s }"
+            (renderOption (sprintf "%A") f.Alignment)
+            (renderOption string f.SpacingBefore)
+            (renderOption string f.SpacingAfter)
+            (renderOption renderLineSpacing f.LineSpacing)
+            (renderOption renderIndentation f.Indentation)
+            f.KeepWithNext
+            f.PageBreakBefore
+            (renderOption renderBorderStyle f.Borders)
+            (renderOption renderColor f.Shading)
 
     let private renderTableBorders (b: TableBorders) : string =
         sprintf
@@ -260,6 +265,17 @@ module CodeGen =
     let private renderDocumentProtection (p: DocumentProtection) : string =
         sprintf "{ Edit = %s; Password = %s }" (renderOption (sprintf "%A") p.Edit) (renderOption quote p.Password)
 
+    let private renderDocumentProperties (p: DocumentProperties) : string =
+        sprintf
+            "{ Title = %s; Author = %s; Subject = %s; Keywords = %s; Comments = %s; Category = %s; Company = %s }"
+            (renderOption quote p.Title)
+            (renderOption quote p.Author)
+            (renderOption quote p.Subject)
+            (renderOption quote p.Keywords)
+            (renderOption quote p.Comments)
+            (renderOption quote p.Category)
+            (renderOption quote p.Company)
+
     /// Renders `doc` as a self-contained `.fsx` script - see `Api.Document.generateScript`.
     let generate (referenceLines: string list) (outputFileName: string) (doc: Document) : string =
         let sb = StringBuilder()
@@ -271,12 +287,13 @@ module CodeGen =
         sb.AppendLine("open Kookerella.FsWordDsl") |> ignore
         sb.AppendLine() |> ignore
 
-        sb.AppendLine(sprintf "let doc: Document = { Sections = %s; Styles = %s; Numbering = %s; Protection = %s; VbaProject = %s }"
+        sb.AppendLine(sprintf "let doc: Document = { Sections = %s; Styles = %s; Numbering = %s; Protection = %s; VbaProject = %s; Properties = %s }"
                           (renderList renderSection doc.Sections)
                           (renderList renderStyleDefinition doc.Styles)
                           (renderList renderNumberingDefinition doc.Numbering)
                           (renderOption renderDocumentProtection doc.Protection)
-                          (renderOption (fun (b: byte[]) -> sprintf "System.Convert.FromBase64String(%s)" (quote (System.Convert.ToBase64String(b)))) doc.VbaProject))
+                          (renderOption (fun (b: byte[]) -> sprintf "System.Convert.FromBase64String(%s)" (quote (System.Convert.ToBase64String(b)))) doc.VbaProject)
+                          (renderDocumentProperties doc.Properties))
         |> ignore
 
         sb.AppendLine() |> ignore

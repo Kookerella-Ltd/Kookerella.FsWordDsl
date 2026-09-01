@@ -269,35 +269,8 @@ module Reader =
               BandedRows = not (flag (fun l -> l.NoHorizontalBand))
               BandedColumns = not (flag (fun l -> l.NoVerticalBand)) })
 
-    let private borderSideOfTop (b: Wordprocessing.TopBorder) : BorderSide =
-        { Style = borderLineStyleOfW b.Val.Value
-          Width = b.Size |> opt |> Option.map (fun v -> borderSideOfWidthEighths v.Value)
-          Color = b.Color |> opt |> Option.map (fun v -> colorOfHex v.Value) }
-
-    let private borderSideOfBottom (b: Wordprocessing.BottomBorder) : BorderSide =
-        { Style = borderLineStyleOfW b.Val.Value
-          Width = b.Size |> opt |> Option.map (fun v -> borderSideOfWidthEighths v.Value)
-          Color = b.Color |> opt |> Option.map (fun v -> colorOfHex v.Value) }
-
-    let private borderSideOfLeft (b: Wordprocessing.LeftBorder) : BorderSide =
-        { Style = borderLineStyleOfW b.Val.Value
-          Width = b.Size |> opt |> Option.map (fun v -> borderSideOfWidthEighths v.Value)
-          Color = b.Color |> opt |> Option.map (fun v -> colorOfHex v.Value) }
-
-    let private borderSideOfRight (b: Wordprocessing.RightBorder) : BorderSide =
-        { Style = borderLineStyleOfW b.Val.Value
-          Width = b.Size |> opt |> Option.map (fun v -> borderSideOfWidthEighths v.Value)
-          Color = b.Color |> opt |> Option.map (fun v -> colorOfHex v.Value) }
-
-    let private borderSideOfInsideH (b: Wordprocessing.InsideHorizontalBorder) : BorderSide =
-        { Style = borderLineStyleOfW b.Val.Value
-          Width = b.Size |> opt |> Option.map (fun v -> borderSideOfWidthEighths v.Value)
-          Color = b.Color |> opt |> Option.map (fun v -> colorOfHex v.Value) }
-
-    let private borderSideOfInsideV (b: Wordprocessing.InsideVerticalBorder) : BorderSide =
-        { Style = borderLineStyleOfW b.Val.Value
-          Width = b.Size |> opt |> Option.map (fun v -> borderSideOfWidthEighths v.Value)
-          Color = b.Color |> opt |> Option.map (fun v -> colorOfHex v.Value) }
+    // `borderSideOfTop`/`OfBottom`/`OfLeft`/`OfRight`/`OfInsideH`/`OfInsideV` live in
+    // `StyleRegistry.fs` now - shared with paragraph borders (`w:pBdr`).
 
     let private tableBordersOfW (tblPr: Wordprocessing.TableProperties option) : TableBorders option =
         tblPr
@@ -625,11 +598,28 @@ module Reader =
                 stream.CopyTo(mem)
                 mem.ToArray())
 
+        let nonEmpty (s: string) : string option = s |> Option.ofObj |> Option.filter (fun v -> v <> "")
+
+        let properties =
+            { Title = nonEmpty wordDoc.PackageProperties.Title
+              Author = nonEmpty wordDoc.PackageProperties.Creator
+              Subject = nonEmpty wordDoc.PackageProperties.Subject
+              Keywords = nonEmpty wordDoc.PackageProperties.Keywords
+              Comments = nonEmpty wordDoc.PackageProperties.Description
+              Category = nonEmpty wordDoc.PackageProperties.Category
+              Company =
+                wordDoc.ExtendedFilePropertiesPart
+                |> opt
+                |> Option.bind (fun p -> p.Properties |> opt)
+                |> Option.bind (fun props -> props.Company |> opt)
+                |> Option.bind (fun c -> nonEmpty c.Text) }
+
         { Sections = readSections mainPart rctx mainPart.Document.Body
           Styles = styles
           Numbering = numbering
           Protection = protection
-          VbaProject = vbaProject }
+          VbaProject = vbaProject
+          Properties = properties }
 
     let loadFromFile (path: string) : Document =
         use wordDoc = WordprocessingDocument.Open(path, false)

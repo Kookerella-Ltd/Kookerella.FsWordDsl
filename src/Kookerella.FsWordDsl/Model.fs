@@ -162,4 +162,6 @@ module Model =
           Styles: StyleDefinition list
           Numbering: NumberingDefinition list
           Protection: DocumentProtection option
-          VbaProject: byte[] option }
+          VbaProject: byte[] option
+          /// Title/Author/Subject/etc. - see `DocumentProperties`'s own doc comment.
+          Properties: DocumentProperties }

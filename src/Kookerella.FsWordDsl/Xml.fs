@@ -162,7 +162,10 @@ module Xml =
             (if s.Strikethrough then [ attr "strikethrough" true ] else []),
             attrOpt "color" (s.Color |> Option.map colorToStr),
             attrOpt "highlight" (s.Highlight |> Option.map highlightToStr),
-            attrOpt "verticalPosition" (s.VerticalPosition |> Option.map vertPosToStr)
+            attrOpt "verticalPosition" (s.VerticalPosition |> Option.map vertPosToStr),
+            (if s.SmallCaps then [ attr "smallCaps" true ] else []),
+            (if s.AllCaps then [ attr "allCaps" true ] else []),
+            (if s.Hidden then [ attr "hidden" true ] else [])
         )
 
     let private strAttr (name: string) (el: XElement) : string option = el.Attribute(xn name) |> Option.ofObj |> Option.map (fun a -> a.Value)
@@ -177,7 +180,10 @@ module Xml =
           Strikethrough = boolAttr "strikethrough" el
           Color = strAttr "color" el |> Option.map colorOfStr
           Highlight = strAttr "highlight" el |> Option.map highlightOfStr
-          VerticalPosition = strAttr "verticalPosition" el |> Option.map vertPosOfStr }
+          VerticalPosition = strAttr "verticalPosition" el |> Option.map vertPosOfStr
+          SmallCaps = boolAttr "smallCaps" el
+          AllCaps = boolAttr "allCaps" el
+          Hidden = boolAttr "hidden" el }
 
     let private indentationToXml (i: Indentation) : XElement =
         XElement(xn "indentation", attrOpt "left" i.Left, attrOpt "right" i.Right, attrOpt "firstLine" i.FirstLine, attrOpt "hanging" i.Hanging)
@@ -187,29 +193,6 @@ module Xml =
           Right = strAttr "right" el |> Option.map float
           FirstLine = strAttr "firstLine" el |> Option.map float
           Hanging = strAttr "hanging" el |> Option.map float }
-
-    let private paragraphFormatToXml (f: ParagraphFormat) : XElement =
-        XElement(
-            xn "paragraphFormat",
-            attrOpt "alignment" (f.Alignment |> Option.map alignToStr),
-            attrOpt "spacingBefore" f.SpacingBefore,
-            attrOpt "spacingAfter" f.SpacingAfter,
-            (if f.KeepWithNext then [ attr "keepWithNext" true ] else []),
-            (if f.PageBreakBefore then [ attr "pageBreakBefore" true ] else []),
-            (f.LineSpacing |> Option.map lineSpacingToXml |> Option.toList),
-            (f.Indentation |> Option.map indentationToXml |> Option.toList)
-        )
-
-    let private paragraphFormatOfXml (el: XElement) : ParagraphFormat =
-        { Alignment = strAttr "alignment" el |> Option.map alignOfStr
-          SpacingBefore = strAttr "spacingBefore" el |> Option.map float
-          SpacingAfter = strAttr "spacingAfter" el |> Option.map float
-          LineSpacing = el.Element(xn "lineSpacing") |> Option.ofObj |> Option.map lineSpacingOfXml
-          Indentation = el.Element(xn "indentation") |> Option.ofObj |> Option.map indentationOfXml
-          KeepWithNext = boolAttr "keepWithNext" el
-          PageBreakBefore = boolAttr "pageBreakBefore" el }
-
-    // --- Borders --------------------------------------------------------------------------
 
     let private borderSideToXml (name: string) (s: BorderSide) : XElement =
         XElement(xn name, attr "style" (borderLineToStr s.Style), attrOpt "width" s.Width, attrOpt "color" (s.Color |> Option.map colorToStr))
@@ -231,6 +214,33 @@ module Xml =
           Right = el.Element(xn "right") |> Option.ofObj |> Option.map borderSideOfXml
           Top = el.Element(xn "top") |> Option.ofObj |> Option.map borderSideOfXml
           Bottom = el.Element(xn "bottom") |> Option.ofObj |> Option.map borderSideOfXml }
+
+    let private paragraphFormatToXml (f: ParagraphFormat) : XElement =
+        XElement(
+            xn "paragraphFormat",
+            attrOpt "alignment" (f.Alignment |> Option.map alignToStr),
+            attrOpt "spacingBefore" f.SpacingBefore,
+            attrOpt "spacingAfter" f.SpacingAfter,
+            (if f.KeepWithNext then [ attr "keepWithNext" true ] else []),
+            (if f.PageBreakBefore then [ attr "pageBreakBefore" true ] else []),
+            attrOpt "shading" (f.Shading |> Option.map colorToStr),
+            (f.LineSpacing |> Option.map lineSpacingToXml |> Option.toList),
+            (f.Indentation |> Option.map indentationToXml |> Option.toList),
+            (f.Borders |> Option.map (fun b -> XElement(xn "borders", borderStyleChildren b)) |> Option.toList)
+        )
+
+    let private paragraphFormatOfXml (el: XElement) : ParagraphFormat =
+        { Alignment = strAttr "alignment" el |> Option.map alignOfStr
+          SpacingBefore = strAttr "spacingBefore" el |> Option.map float
+          SpacingAfter = strAttr "spacingAfter" el |> Option.map float
+          LineSpacing = el.Element(xn "lineSpacing") |> Option.ofObj |> Option.map lineSpacingOfXml
+          Indentation = el.Element(xn "indentation") |> Option.ofObj |> Option.map indentationOfXml
+          KeepWithNext = boolAttr "keepWithNext" el
+          PageBreakBefore = boolAttr "pageBreakBefore" el
+          Shading = strAttr "shading" el |> Option.map colorOfStr
+          Borders = el.Element(xn "borders") |> Option.ofObj |> Option.map borderStyleOfXml }
+
+    // --- Borders --------------------------------------------------------------------------
 
     let private tableBordersToXml (b: TableBorders) : XElement =
         XElement(
@@ -570,6 +580,27 @@ module Xml =
 
     // --- Top level ------------------------------------------------------------------------
 
+    let private documentPropertiesToXml (p: DocumentProperties) : XElement =
+        XElement(
+            xn "properties",
+            attrOpt "title" p.Title,
+            attrOpt "author" p.Author,
+            attrOpt "subject" p.Subject,
+            attrOpt "keywords" p.Keywords,
+            attrOpt "comments" p.Comments,
+            attrOpt "category" p.Category,
+            attrOpt "company" p.Company
+        )
+
+    let private documentPropertiesOfXml (el: XElement) : DocumentProperties =
+        { Title = strAttr "title" el
+          Author = strAttr "author" el
+          Subject = strAttr "subject" el
+          Keywords = strAttr "keywords" el
+          Comments = strAttr "comments" el
+          Category = strAttr "category" el
+          Company = strAttr "company" el }
+
     /// `Document` -> `XElement`. See this file's own conventions above and the worked
     /// examples in the root README.
     let toDocument (doc: Document) : XElement =
@@ -579,7 +610,8 @@ module Xml =
             (if doc.Styles.IsEmpty then [] else [ XElement(xn "styles", doc.Styles |> List.map styleDefinitionToXml) ]),
             (if doc.Numbering.IsEmpty then [] else [ XElement(xn "numbering", doc.Numbering |> List.map numberingDefinitionToXml) ]),
             (doc.Protection |> Option.map protectionToXml |> Option.toList),
-            (doc.VbaProject |> Option.map (fun b -> XElement(xn "vbaProject", Convert.ToBase64String(b))) |> Option.toList)
+            (doc.VbaProject |> Option.map (fun b -> XElement(xn "vbaProject", Convert.ToBase64String(b))) |> Option.toList),
+            (if doc.Properties = DocumentProperties.Default then [] else [ documentPropertiesToXml doc.Properties ])
         )
 
     /// `XElement` -> `Document`, the inverse of `toDocument`.
@@ -588,7 +620,8 @@ module Xml =
           Styles = el.Element(xn "styles") |> Option.ofObj |> Option.map (fun e -> e.Elements(xn "style") |> Seq.map styleDefinitionOfXml |> List.ofSeq) |> Option.defaultValue []
           Numbering = el.Element(xn "numbering") |> Option.ofObj |> Option.map (fun e -> e.Elements(xn "numberingDef") |> Seq.map numberingDefinitionOfXml |> List.ofSeq) |> Option.defaultValue []
           Protection = el.Element(xn "protection") |> Option.ofObj |> Option.map protectionOfXml
-          VbaProject = el.Element(xn "vbaProject") |> Option.ofObj |> Option.map (fun e -> Convert.FromBase64String(e.Value)) }
+          VbaProject = el.Element(xn "vbaProject") |> Option.ofObj |> Option.map (fun e -> Convert.FromBase64String(e.Value))
+          Properties = el.Element(xn "properties") |> Option.ofObj |> Option.map documentPropertiesOfXml |> Option.defaultValue DocumentProperties.Default }
 
     /// Loads the embedded schema for validating either direction yourself
     /// (`XDocument.Validate`).

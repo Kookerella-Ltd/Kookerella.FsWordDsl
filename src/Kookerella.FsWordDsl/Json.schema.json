@@ -8,7 +8,8 @@
     "styles": { "type": "array", "items": { "$ref": "#/$defs/style" } },
     "numbering": { "type": "array", "items": { "$ref": "#/$defs/numberingDef" } },
     "protection": { "$ref": "#/$defs/protection" },
-    "vbaProject": { "type": "string" }
+    "vbaProject": { "type": "string" },
+    "properties": { "$ref": "#/$defs/documentProperties" }
   },
   "$defs": {
     "section": {
@@ -98,7 +99,10 @@
         "strikethrough": { "type": "boolean" },
         "color": { "type": "string" },
         "highlight": { "type": "string" },
-        "verticalPosition": { "type": "string" }
+        "verticalPosition": { "type": "string" },
+        "smallCaps": { "type": "boolean" },
+        "allCaps": { "type": "boolean" },
+        "hidden": { "type": "boolean" }
       }
     },
     "paragraphFormat": {
@@ -110,7 +114,9 @@
         "lineSpacing": {},
         "indentation": { "type": "object" },
         "keepWithNext": { "type": "boolean" },
-        "pageBreakBefore": { "type": "boolean" }
+        "pageBreakBefore": { "type": "boolean" },
+        "shading": { "type": "string" },
+        "borders": { "type": "object" }
       }
     },
     "table": {
@@ -164,6 +170,18 @@
       "properties": {
         "edit": { "type": "string" },
         "password": { "type": "string" }
+      }
+    },
+    "documentProperties": {
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "author": { "type": "string" },
+        "subject": { "type": "string" },
+        "keywords": { "type": "string" },
+        "comments": { "type": "string" },
+        "category": { "type": "string" },
+        "company": { "type": "string" }
       }
     }
   }

@@ -25,6 +25,16 @@
           <run>
             <runStyle strikethrough="true" />struck through</run>
         </para>
+        <para>
+          <run>
+            <runStyle smallCaps="true" />SMALL CAPS</run>
+          <run> and </run>
+          <run>
+            <runStyle allCaps="true" />ALL CAPS</run>
+          <run> and </run>
+          <run>
+            <runStyle hidden="true" />hidden text</run>
+        </para>
       </body>
     </section>
   </sections>

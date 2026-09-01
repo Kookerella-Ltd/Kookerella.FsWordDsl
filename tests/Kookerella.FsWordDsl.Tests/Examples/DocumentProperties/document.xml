@@ -8,24 +8,7 @@
       </pageSetup>
       <body>
         <para>
-          <paragraphFormat alignment="center" spacingBefore="12" spacingAfter="12" />
-          <run>Centered heading-like text.</run>
-        </para>
-        <para>
-          <paragraphFormat>
-            <lineSpacing kind="double" />
-            <indentation left="36" />
-          </paragraphFormat>
-          <run>An indented, double-spaced paragraph.</run>
-        </para>
-        <para>
-          <paragraphFormat shading="D9D9D9">
-            <borders>
-              <top style="single" width="1" color="000000" />
-              <bottom style="single" width="1" color="000000" />
-            </borders>
-          </paragraphFormat>
-          <run>A paragraph with top/bottom borders and shading.</run>
+          <run>A document with core metadata set.</run>
         </para>
       </body>
     </section>
@@ -71,4 +54,5 @@
       <runStyle size="10" />
     </style>
   </styles>
+  <properties title="Quarterly Report" author="Kookerella" subject="Q3 Results" keywords="finance, quarterly, report" comments="Draft for review" category="Reports" company="Kookerella Ltd" />
 </document>

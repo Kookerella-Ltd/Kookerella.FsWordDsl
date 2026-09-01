@@ -97,30 +97,10 @@ module Writer =
         Wordprocessing.Numbering(abstractNums @ instances)
 
     // --- Borders --------------------------------------------------------------------------
-
-    let private borderSideToTop (side: BorderSide) : Wordprocessing.TopBorder =
-        Wordprocessing.TopBorder(Val = EnumValue(borderLineStyleToW side.Style), Size = UInt32Value(borderSideWidthEighths side), Space = UInt32Value 0u)
-        |> fun b -> side.Color |> Option.iter (fun c -> b.Color <- StringValue(colorToHex c)); b
-
-    let private borderSideToBottom (side: BorderSide) : Wordprocessing.BottomBorder =
-        Wordprocessing.BottomBorder(Val = EnumValue(borderLineStyleToW side.Style), Size = UInt32Value(borderSideWidthEighths side), Space = UInt32Value 0u)
-        |> fun b -> side.Color |> Option.iter (fun c -> b.Color <- StringValue(colorToHex c)); b
-
-    let private borderSideToLeft (side: BorderSide) : Wordprocessing.LeftBorder =
-        Wordprocessing.LeftBorder(Val = EnumValue(borderLineStyleToW side.Style), Size = UInt32Value(borderSideWidthEighths side), Space = UInt32Value 0u)
-        |> fun b -> side.Color |> Option.iter (fun c -> b.Color <- StringValue(colorToHex c)); b
-
-    let private borderSideToRight (side: BorderSide) : Wordprocessing.RightBorder =
-        Wordprocessing.RightBorder(Val = EnumValue(borderLineStyleToW side.Style), Size = UInt32Value(borderSideWidthEighths side), Space = UInt32Value 0u)
-        |> fun b -> side.Color |> Option.iter (fun c -> b.Color <- StringValue(colorToHex c)); b
-
-    let private borderSideToInsideH (side: BorderSide) : Wordprocessing.InsideHorizontalBorder =
-        Wordprocessing.InsideHorizontalBorder(Val = EnumValue(borderLineStyleToW side.Style), Size = UInt32Value(borderSideWidthEighths side), Space = UInt32Value 0u)
-        |> fun b -> side.Color |> Option.iter (fun c -> b.Color <- StringValue(colorToHex c)); b
-
-    let private borderSideToInsideV (side: BorderSide) : Wordprocessing.InsideVerticalBorder =
-        Wordprocessing.InsideVerticalBorder(Val = EnumValue(borderLineStyleToW side.Style), Size = UInt32Value(borderSideWidthEighths side), Space = UInt32Value 0u)
-        |> fun b -> side.Color |> Option.iter (fun c -> b.Color <- StringValue(colorToHex c)); b
+    //
+    // `borderSideToTop`/`ToBottom`/`ToLeft`/`ToRight`/`ToInsideH`/`ToInsideV` live in
+    // `StyleRegistry.fs` now - shared with paragraph borders (`w:pBdr`), which reuse the
+    // very same SDK element classes.
 
     let private tableBordersToW (b: TableBorders) : Wordprocessing.TableBorders =
         let tb = Wordprocessing.TableBorders()
@@ -656,6 +636,24 @@ module Writer =
             let vbaPart = mainPart.AddNewPart<VbaProjectPart>()
             use stream = new MemoryStream(bytes)
             vbaPart.FeedData(stream))
+
+        let p = doc.Properties
+
+        // Only touches `docProps/core.xml`/`app.xml` at all when at least one field is
+        // set - an all-`None` `DocumentProperties` writes neither part, so it round-trips
+        // back to `DocumentProperties.Default` exactly (see that type's own doc comment).
+        if p <> DocumentProperties.Default then
+            p.Title |> Option.iter (fun v -> wordDoc.PackageProperties.Title <- v)
+            p.Author |> Option.iter (fun v -> wordDoc.PackageProperties.Creator <- v)
+            p.Subject |> Option.iter (fun v -> wordDoc.PackageProperties.Subject <- v)
+            p.Keywords |> Option.iter (fun v -> wordDoc.PackageProperties.Keywords <- v)
+            p.Comments |> Option.iter (fun v -> wordDoc.PackageProperties.Description <- v)
+            p.Category |> Option.iter (fun v -> wordDoc.PackageProperties.Category <- v)
+
+            p.Company
+            |> Option.iter (fun company ->
+                let extPart = wordDoc.AddExtendedFilePropertiesPart()
+                extPart.Properties <- ExtendedProperties.Properties(Company = ExtendedProperties.Company(company)))
 
     let saveToStream (doc: Document) (stream: Stream) : unit =
         use wordDoc = WordprocessingDocument.Create(stream, docTypeOf doc)

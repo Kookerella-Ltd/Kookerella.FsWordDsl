@@ -13,10 +13,13 @@ inexact, lossy, or simply not implemented yet, so you know what to expect from a
   text (mixed formatting within one paragraph) is first-class here, not a documented gap.
   Run formatting: font family, size, bold, italic, underline (six named styles plus an
   `OtherUnderline` escape hatch), strikethrough, color, highlight (Word's own fixed
-  16-color palette, not arbitrary RGB), superscript/subscript.
+  16-color palette, not arbitrary RGB), superscript/subscript, small caps, all caps,
+  hidden text.
 - **Paragraph formatting**: alignment, spacing before/after, line spacing (single/1.5/
   double/at-least/exactly/multiple), indentation (left/right/first-line/hanging),
-  keep-with-next, page-break-before.
+  keep-with-next, page-break-before, borders (`BorderStyle`, the same shape reused for
+  table/cell borders - top/bottom/left/right only, no `between`/`bar`, same gap as table
+  borders not modeling diagonals), shading (background fill color).
 - **Named styles** (`styles.xml`): paragraph and character styles, with `BasedOn`
   inheritance (the chain itself isn't resolved by this DSL - see the gap below) and a
   small built-in catalog (`BuiltInStyles.normal`/`heading1`/`2`/`3`/`title`/
@@ -80,6 +83,11 @@ inexact, lossy, or simply not implemented yet, so you know what to expect from a
   `Xml.xsd`) and `Json.toDocument`/`Json.ofDocument` (against the test-suite-only
   `Json.schema.json`) cover the same feature set as the rest of this library, for a caller
   who'd rather generate or consume data than write F#/C# at all.
+- **Document core properties**: Title, Author, Subject, Keywords, Comments, Category
+  (`docProps/core.xml`, via `WordprocessingDocument.PackageProperties`) and Company
+  (`docProps/app.xml`, via `ExtendedFilePropertiesPart`) - only written/read when at least
+  one is set (`DocumentProperties.Default` round-trips to nothing on disk, same "all-defaults
+  reads back as absent" discipline the rest of this DSL follows).
 
 ## Known gaps (documented, not silently "supported")
 

@@ -33,9 +33,10 @@ reasoning and what adding either would look like.
     WordprocessingML uses on the wire (twips for page geometry/spacing, EMU for image
     sizing).
   - `Styles.fs` - character and paragraph formatting: `Color`, `HighlightColor` (Word's own
-    fixed highlight palette), `UnderlineStyle`, `RunStyle`, `ParagraphAlignment`,
-    `Indentation`, `LineSpacingRule`, `ParagraphFormat`, `BorderLineStyle`, `BorderSide`,
-    `BorderStyle` (reused for both paragraph and table borders).
+    fixed highlight palette), `UnderlineStyle`, `RunStyle` (including small caps/all
+    caps/hidden text), `ParagraphAlignment`, `Indentation`, `LineSpacingRule`,
+    `ParagraphFormat` (including paragraph borders and shading), `BorderLineStyle`,
+    `BorderSide`, `BorderStyle` (reused for both paragraph and table borders).
   - `NamedStyles.fs` - `StyleDefinition` (paragraph or character, with `BasedOn`
     inheritance) and a small `BuiltInStyles` catalog (`normal`, `heading1`/`2`/`3`,
     `title`, `listParagraph`, `hyperlinkCharStyle`).
@@ -48,11 +49,14 @@ reasoning and what adding either would look like.
   - `Tables.fs` - `TableBorders`, `VerticalMergeKind`, `TableCellProps`, `TableStyleRef`.
   - `Images.fs` - `ImageFormat`, `ImageEntry` (raw file bytes plus an on-page size),
     anchored inline within a run.
+  - `DocumentProperties.fs` - `DocumentProperties` (Title, Author, Subject, Keywords,
+    Comments, Category, Company) - core document metadata, `Document.Properties`.
   - `Model.fs` - the recursive content model: `Inline` (runs, breaks, images, hyperlinks,
     bookmarks, comments, simple fields, footnotes/endnotes), `Paragraph`, `Block`
     (paragraph or table), `TableCell`/`TableRow`/`TableEntry`, `HeaderFooterSet`,
     `SectionProperties` (including `BreakType`), `Section`, `Document` (including
-    `Document.VbaProject`, a macro-enabled document's raw `vbaProject.bin` bytes).
+    `Document.VbaProject`, a macro-enabled document's raw `vbaProject.bin` bytes, and
+    `Document.Properties`).
   - `Xml.fs` / `Xml.xsd` - the XML surface: `Xml.toDocument`/`Xml.ofDocument` translate a
     `Document` to/from an `XElement` tree, and `Xml.schemaSet()` loads the paired schema
     (embedded in the assembly as a resource) for validating either direction. See
@@ -61,10 +65,11 @@ reasoning and what adding either would look like.
     translate a `Document` to/from a `System.Text.Json.Nodes.JsonObject` tree. Schema
     validation is test-suite only, not a public API. See ["## JSON"](#json) below.
   - `Builders.fs` - plain functional constructors (`section`, `document`, `withStyles`,
-    `withNumbering`, `withProtection`, `withVbaProject`, `bulletListDef`,
-    `numberedListDef`) plus `DocumentDsl` - smart constructors (`run`, `para`, `hyperlink`,
-    `bookmark`, `comment`, `image`, `footnote`, `endnote`, `tableCell`, `tableRow`, `table`)
-    with real optional parameters, the Word analog of the Excel repo's `SheetDsl`.
+    `withNumbering`, `withProtection`, `withVbaProject`, `withDocumentProperties`,
+    `bulletListDef`, `numberedListDef`) plus `DocumentDsl` - smart constructors (`run`,
+    `para`, `hyperlink`, `bookmark`, `comment`, `image`, `footnote`, `endnote`,
+    `tableCell`, `tableRow`, `table`) with real optional parameters, the Word analog of the
+    Excel repo's `SheetDsl`.
   - `Interpreter/StyleRegistry.fs` - shared run/paragraph/border/color conversions plus
     `Document.Styles` <-> `styles.xml` (internal).
   - `Interpreter/ImageWriter.fs` / `ImageReader.fs` - an inline image's own DSL <->
@@ -126,6 +131,17 @@ para
       run ("bold", style = { RunStyle.Default with Bold = true })
       run ", and "
       run ("colored", style = { RunStyle.Default with Color = Some Color.red }) ]
+```
+
+`RunStyle` also covers small caps, all caps, and hidden text; `ParagraphFormat` covers
+borders (`BorderStyle`, the same shape used for table borders) and shading:
+
+```fsharp
+para
+    ([ run "ALL CAPS AND SMALL CAPS" ], format =
+        { ParagraphFormat.Default with
+            Borders = Some { BorderStyle.None with Bottom = Some { Style = SingleLine; Width = Some 1.0; Color = Some Color.black } }
+            Shading = Some(Rgb(0xD9uy, 0xD9uy, 0xD9uy)) })
 ```
 
 Lists use a `(numId, level)` reference on the paragraph, resolved against a
@@ -199,12 +215,13 @@ Comments and bookmarks wrap inline content directly (scoped to within one paragr
 para [ comment ([ run "This figure needs review." ], "Please double check the totals.", author = "Alex") ]
 ```
 
-Document-level protection and macros are pipe-friendly, same shape as Excel's own
-`withProtection`/`withVbaProject`:
+Document-level protection, macros, and core properties are all pipe-friendly, same shape as
+Excel's own `withProtection`/`withVbaProject`:
 
 ```fsharp
 document [...] |> withProtection { Edit = Some ReadOnlyRestriction; Password = Some "hunter2" }
 document [...] |> withVbaProject (System.IO.File.ReadAllBytes("vbaProject.bin"))
+document [...] |> withDocumentProperties { DocumentProperties.Default with Title = Some "Quarterly Report"; Author = Some "Kookerella" }
 ```
 
 Save the result with a `.docm` path - `Document.save`/`saveToStream` automatically switch

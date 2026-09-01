@@ -152,7 +152,10 @@ module Json =
               "strikethrough", (if s.Strikethrough then Some(jbool true) else None)
               "color", s.Color |> Option.map (colorToStr >> jstr)
               "highlight", s.Highlight |> Option.map (highlightToStr >> jstr)
-              "verticalPosition", s.VerticalPosition |> Option.map (fun v -> jstr (match v with Superscript -> "superscript" | Subscript -> "subscript")) ]
+              "verticalPosition", s.VerticalPosition |> Option.map (fun v -> jstr (match v with Superscript -> "superscript" | Subscript -> "subscript"))
+              "smallCaps", (if s.SmallCaps then Some(jbool true) else None)
+              "allCaps", (if s.AllCaps then Some(jbool true) else None)
+              "hidden", (if s.Hidden then Some(jbool true) else None) ]
         :> JsonNode
 
     let private runStyleOfJson (o: JsonObject) : RunStyle =
@@ -164,7 +167,10 @@ module Json =
           Strikethrough = boolean "strikethrough" o
           Color = str "color" o |> Option.map colorOfStr
           Highlight = str "highlight" o |> Option.map highlightOfStr
-          VerticalPosition = str "verticalPosition" o |> Option.map (fun s -> if s = "subscript" then Subscript else Superscript) }
+          VerticalPosition = str "verticalPosition" o |> Option.map (fun s -> if s = "subscript" then Subscript else Superscript)
+          SmallCaps = boolean "smallCaps" o
+          AllCaps = boolean "allCaps" o
+          Hidden = boolean "hidden" o }
 
     let private indentationToJson (i: Indentation) : JsonNode =
         obj_ [ "left", i.Left |> Option.map jnum; "right", i.Right |> Option.map jnum; "firstLine", i.FirstLine |> Option.map jnum; "hanging", i.Hanging |> Option.map jnum ]
@@ -195,6 +201,28 @@ module Json =
             elif not (isNull o.["exactly"]) then ExactlySpacing(o.["exactly"].GetValue<float>())
             else MultipleSpacing(o.["multiple"].GetValue<float>())
 
+    // --- Borders --------------------------------------------------------------------------
+
+    let private borderSideToJson (s: BorderSide) : JsonNode =
+        obj_ [ "style", Some(jstr (borderLineToStr s.Style)); "width", s.Width |> Option.map jnum; "color", s.Color |> Option.map (colorToStr >> jstr) ] :> JsonNode
+
+    let private borderSideOfJson (o: JsonObject) : BorderSide =
+        { Style = borderLineOfStr (str "style" o |> Option.get); Width = num "width" o; Color = str "color" o |> Option.map colorOfStr }
+
+    let private borderStyleToJson (b: BorderStyle) : JsonNode =
+        obj_
+            [ "left", b.Left |> Option.map borderSideToJson
+              "right", b.Right |> Option.map borderSideToJson
+              "top", b.Top |> Option.map borderSideToJson
+              "bottom", b.Bottom |> Option.map borderSideToJson ]
+        :> JsonNode
+
+    let private borderStyleOfJson (o: JsonObject) : BorderStyle =
+        { Left = prop "left" o |> Option.map borderSideOfJson
+          Right = prop "right" o |> Option.map borderSideOfJson
+          Top = prop "top" o |> Option.map borderSideOfJson
+          Bottom = prop "bottom" o |> Option.map borderSideOfJson }
+
     let private paragraphFormatToJson (f: ParagraphFormat) : JsonNode =
         obj_
             [ "alignment", f.Alignment |> Option.map (alignToStr >> jstr)
@@ -203,7 +231,9 @@ module Json =
               "lineSpacing", f.LineSpacing |> Option.map lineSpacingToJson
               "indentation", f.Indentation |> Option.map indentationToJson
               "keepWithNext", (if f.KeepWithNext then Some(jbool true) else None)
-              "pageBreakBefore", (if f.PageBreakBefore then Some(jbool true) else None) ]
+              "pageBreakBefore", (if f.PageBreakBefore then Some(jbool true) else None)
+              "shading", f.Shading |> Option.map (colorToStr >> jstr)
+              "borders", f.Borders |> Option.map borderStyleToJson ]
         :> JsonNode
 
     let private paragraphFormatOfJson (o: JsonObject) : ParagraphFormat =
@@ -213,15 +243,9 @@ module Json =
           LineSpacing = (match o.["lineSpacing"] with null -> None | n -> Some(lineSpacingOfJson n))
           Indentation = prop "indentation" o |> Option.map indentationOfJson
           KeepWithNext = boolean "keepWithNext" o
-          PageBreakBefore = boolean "pageBreakBefore" o }
-
-    // --- Borders --------------------------------------------------------------------------
-
-    let private borderSideToJson (s: BorderSide) : JsonNode =
-        obj_ [ "style", Some(jstr (borderLineToStr s.Style)); "width", s.Width |> Option.map jnum; "color", s.Color |> Option.map (colorToStr >> jstr) ] :> JsonNode
-
-    let private borderSideOfJson (o: JsonObject) : BorderSide =
-        { Style = borderLineOfStr (str "style" o |> Option.get); Width = num "width" o; Color = str "color" o |> Option.map colorOfStr }
+          PageBreakBefore = boolean "pageBreakBefore" o
+          Shading = str "shading" o |> Option.map colorOfStr
+          Borders = prop "borders" o |> Option.map borderStyleOfJson }
 
     let private tableBordersToJson (b: TableBorders) : JsonNode =
         obj_
@@ -629,6 +653,26 @@ module Json =
 
         { Edit = edit; Password = str "password" o }
 
+    let private documentPropertiesToJson (p: DocumentProperties) : JsonNode =
+        obj_
+            [ "title", p.Title |> Option.map jstr
+              "author", p.Author |> Option.map jstr
+              "subject", p.Subject |> Option.map jstr
+              "keywords", p.Keywords |> Option.map jstr
+              "comments", p.Comments |> Option.map jstr
+              "category", p.Category |> Option.map jstr
+              "company", p.Company |> Option.map jstr ]
+        :> JsonNode
+
+    let private documentPropertiesOfJson (o: JsonObject) : DocumentProperties =
+        { Title = str "title" o
+          Author = str "author" o
+          Subject = str "subject" o
+          Keywords = str "keywords" o
+          Comments = str "comments" o
+          Category = str "category" o
+          Company = str "company" o }
+
     // --- Top level ------------------------------------------------------------------------
 
     /// `Document` -> `JsonObject`. See this file's own conventions above and the worked
@@ -639,7 +683,8 @@ module Json =
               "styles", (if doc.Styles.IsEmpty then None else Some(JsonArray(doc.Styles |> List.map styleDefinitionToJson |> Array.ofList)))
               "numbering", (if doc.Numbering.IsEmpty then None else Some(JsonArray(doc.Numbering |> List.map numberingDefinitionToJson |> Array.ofList)))
               "protection", doc.Protection |> Option.map protectionToJson
-              "vbaProject", doc.VbaProject |> Option.map (fun b -> jstr (Convert.ToBase64String(b))) ]
+              "vbaProject", doc.VbaProject |> Option.map (fun b -> jstr (Convert.ToBase64String(b)))
+              "properties", (if doc.Properties = DocumentProperties.Default then None else Some(documentPropertiesToJson doc.Properties)) ]
 
     /// `JsonObject` -> `Document`, the inverse of `toDocument`.
     let ofDocument (o: JsonObject) : Document =
@@ -647,4 +692,5 @@ module Json =
           Styles = arr "styles" o |> List.map styleDefinitionOfJson
           Numbering = arr "numbering" o |> List.map numberingDefinitionOfJson
           Protection = prop "protection" o |> Option.map protectionOfJson
-          VbaProject = str "vbaProject" o |> Option.map Convert.FromBase64String }
+          VbaProject = str "vbaProject" o |> Option.map Convert.FromBase64String
+          Properties = prop "properties" o |> Option.map documentPropertiesOfJson |> Option.defaultValue DocumentProperties.Default }

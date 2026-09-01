@@ -72,7 +72,19 @@ module Styles =
           Strikethrough: bool
           Color: Color option
           Highlight: HighlightColor option
-          VerticalPosition: VerticalPosition option }
+          VerticalPosition: VerticalPosition option
+          /// Renders lowercase letters as smaller uppercase ones (`w:smallCaps`) - distinct
+          /// from `AllCaps`, which renders them as full-size uppercase instead.
+          SmallCaps: bool
+          /// Renders every letter as uppercase for display, without changing the run's own
+          /// stored text (`w:caps`) - mutually exclusive with `SmallCaps` in real Word (only
+          /// one visibly wins), but this DSL doesn't prevent setting both, same "trust the
+          /// caller" posture the rest of this module takes.
+          AllCaps: bool
+          /// Text present in the document but not displayed or printed until unhidden
+          /// (`w:vanish`) - distinct from `DocumentProtection`, which restricts editing
+          /// rather than visibility.
+          Hidden: bool }
 
         static member Default =
             { FontFamily = None
@@ -83,7 +95,10 @@ module Styles =
               Strikethrough = false
               Color = None
               Highlight = None
-              VerticalPosition = None }
+              VerticalPosition = None
+              SmallCaps = false
+              AllCaps = false
+              Hidden = false }
 
     type ParagraphAlignment =
         | AlignLeft
@@ -119,28 +134,6 @@ module Styles =
         /// A multiple of single line spacing, e.g. `Multiple 1.15`.
         | MultipleSpacing of factor: float
 
-    /// Direct/inline paragraph formatting - written straight onto the paragraph's own
-    /// `w:pPr`. `StyleId` (on `Paragraph` itself, not here) supplies the named-style layer;
-    /// this record is the override/direct-formatting layer on top of it, same relationship
-    /// direct cell formatting has to (the non-existent, for Excel) named cell styles.
-    type ParagraphFormat =
-        { Alignment: ParagraphAlignment option
-          SpacingBefore: float option
-          SpacingAfter: float option
-          LineSpacing: LineSpacingRule option
-          Indentation: Indentation option
-          KeepWithNext: bool
-          PageBreakBefore: bool }
-
-        static member Default =
-            { Alignment = None
-              SpacingBefore = None
-              SpacingAfter = None
-              LineSpacing = None
-              Indentation = None
-              KeepWithNext = false
-              PageBreakBefore = false }
-
     /// WordprocessingML defines many more border styles than this names explicitly (dashed
     /// variants, triple lines, 3-D effects, art borders, ...); `OtherLine` preserves the raw
     /// OOXML style name so reading and re-writing an existing document round-trips even for
@@ -165,7 +158,10 @@ module Styles =
 
     /// Reused for both paragraph borders (`w:pBdr`) and table/cell borders (`w:tblBorders`/
     /// `w:tcBorders`) - same shape as Excel's `BorderStyle`, which is reused across cell and
-    /// conditional-formatting borders the same way.
+    /// conditional-formatting borders the same way. `w:pBdr` also allows `between`/`bar`
+    /// sides (a line between consecutive same-bordered paragraphs, and a vertical bar) -
+    /// not modeled, same "narrow scope, document the gap" posture as `Tables.TableBorders`
+    /// not modeling diagonal cell borders.
     type BorderStyle =
         { Left: BorderSide option
           Right: BorderSide option
@@ -177,3 +173,33 @@ module Styles =
               Right = None
               Top = None
               Bottom = None }
+
+    /// Direct/inline paragraph formatting - written straight onto the paragraph's own
+    /// `w:pPr`. `StyleId` (on `Paragraph` itself, not here) supplies the named-style layer;
+    /// this record is the override/direct-formatting layer on top of it, same relationship
+    /// direct cell formatting has to (the non-existent, for Excel) named cell styles.
+    type ParagraphFormat =
+        { Alignment: ParagraphAlignment option
+          SpacingBefore: float option
+          SpacingAfter: float option
+          LineSpacing: LineSpacingRule option
+          Indentation: Indentation option
+          KeepWithNext: bool
+          PageBreakBefore: bool
+          /// The paragraph's own border box (`w:pBdr`) - independent of any table border
+          /// the paragraph might also sit inside.
+          Borders: BorderStyle option
+          /// Background fill behind the paragraph's text (`w:shd`) - same `Color` type
+          /// `Tables.TableCellProps.Shading` uses for a table cell's own background.
+          Shading: Color option }
+
+        static member Default =
+            { Alignment = None
+              SpacingBefore = None
+              SpacingAfter = None
+              LineSpacing = None
+              Indentation = None
+              KeepWithNext = false
+              PageBreakBefore = false
+              Borders = None
+              Shading = None }

@@ -114,6 +114,85 @@ module StyleRegistry =
 
     let borderSideOfWidthEighths (eighths: uint32) : float = float eighths / 8.0
 
+    /// Shared by table borders (`Writer.fs`'s `TableBorders`/`TableCellBorders`) and
+    /// paragraph borders (`w:pBdr`, below) - both contexts reuse the very same
+    /// `TopBorder`/`LeftBorder`/`BottomBorder`/`RightBorder`/`InsideHorizontalBorder`/
+    /// `InsideVerticalBorder` SDK classes (confirmed by reflection, not assumed - see this
+    /// repo's `CLAUDE.md` on why that verification step matters for this SDK).
+    let borderSideToTop (side: BorderSide) : Wordprocessing.TopBorder =
+        let b = Wordprocessing.TopBorder(Val = EnumValue(borderLineStyleToW side.Style), Size = UInt32Value(borderSideWidthEighths side), Space = UInt32Value 0u)
+        side.Color |> Option.iter (fun c -> b.Color <- StringValue(colorToHex c))
+        b
+
+    let borderSideToBottom (side: BorderSide) : Wordprocessing.BottomBorder =
+        let b = Wordprocessing.BottomBorder(Val = EnumValue(borderLineStyleToW side.Style), Size = UInt32Value(borderSideWidthEighths side), Space = UInt32Value 0u)
+        side.Color |> Option.iter (fun c -> b.Color <- StringValue(colorToHex c))
+        b
+
+    let borderSideToLeft (side: BorderSide) : Wordprocessing.LeftBorder =
+        let b = Wordprocessing.LeftBorder(Val = EnumValue(borderLineStyleToW side.Style), Size = UInt32Value(borderSideWidthEighths side), Space = UInt32Value 0u)
+        side.Color |> Option.iter (fun c -> b.Color <- StringValue(colorToHex c))
+        b
+
+    let borderSideToRight (side: BorderSide) : Wordprocessing.RightBorder =
+        let b = Wordprocessing.RightBorder(Val = EnumValue(borderLineStyleToW side.Style), Size = UInt32Value(borderSideWidthEighths side), Space = UInt32Value 0u)
+        side.Color |> Option.iter (fun c -> b.Color <- StringValue(colorToHex c))
+        b
+
+    let borderSideToInsideH (side: BorderSide) : Wordprocessing.InsideHorizontalBorder =
+        let b = Wordprocessing.InsideHorizontalBorder(Val = EnumValue(borderLineStyleToW side.Style), Size = UInt32Value(borderSideWidthEighths side), Space = UInt32Value 0u)
+        side.Color |> Option.iter (fun c -> b.Color <- StringValue(colorToHex c))
+        b
+
+    let borderSideToInsideV (side: BorderSide) : Wordprocessing.InsideVerticalBorder =
+        let b = Wordprocessing.InsideVerticalBorder(Val = EnumValue(borderLineStyleToW side.Style), Size = UInt32Value(borderSideWidthEighths side), Space = UInt32Value 0u)
+        side.Color |> Option.iter (fun c -> b.Color <- StringValue(colorToHex c))
+        b
+
+    let borderSideOfTop (b: Wordprocessing.TopBorder) : BorderSide =
+        { Style = borderLineStyleOfW b.Val.Value
+          Width = b.Size |> Option.ofObj |> Option.map (fun v -> borderSideOfWidthEighths v.Value)
+          Color = b.Color |> Option.ofObj |> Option.map (fun v -> colorOfHex v.Value) }
+
+    let borderSideOfBottom (b: Wordprocessing.BottomBorder) : BorderSide =
+        { Style = borderLineStyleOfW b.Val.Value
+          Width = b.Size |> Option.ofObj |> Option.map (fun v -> borderSideOfWidthEighths v.Value)
+          Color = b.Color |> Option.ofObj |> Option.map (fun v -> colorOfHex v.Value) }
+
+    let borderSideOfLeft (b: Wordprocessing.LeftBorder) : BorderSide =
+        { Style = borderLineStyleOfW b.Val.Value
+          Width = b.Size |> Option.ofObj |> Option.map (fun v -> borderSideOfWidthEighths v.Value)
+          Color = b.Color |> Option.ofObj |> Option.map (fun v -> colorOfHex v.Value) }
+
+    let borderSideOfRight (b: Wordprocessing.RightBorder) : BorderSide =
+        { Style = borderLineStyleOfW b.Val.Value
+          Width = b.Size |> Option.ofObj |> Option.map (fun v -> borderSideOfWidthEighths v.Value)
+          Color = b.Color |> Option.ofObj |> Option.map (fun v -> colorOfHex v.Value) }
+
+    let borderSideOfInsideH (b: Wordprocessing.InsideHorizontalBorder) : BorderSide =
+        { Style = borderLineStyleOfW b.Val.Value
+          Width = b.Size |> Option.ofObj |> Option.map (fun v -> borderSideOfWidthEighths v.Value)
+          Color = b.Color |> Option.ofObj |> Option.map (fun v -> colorOfHex v.Value) }
+
+    let borderSideOfInsideV (b: Wordprocessing.InsideVerticalBorder) : BorderSide =
+        { Style = borderLineStyleOfW b.Val.Value
+          Width = b.Size |> Option.ofObj |> Option.map (fun v -> borderSideOfWidthEighths v.Value)
+          Color = b.Color |> Option.ofObj |> Option.map (fun v -> colorOfHex v.Value) }
+
+    let paragraphBordersToW (b: BorderStyle) : Wordprocessing.ParagraphBorders =
+        let pBdr = Wordprocessing.ParagraphBorders()
+        b.Top |> Option.iter (fun s -> pBdr.TopBorder <- borderSideToTop s)
+        b.Bottom |> Option.iter (fun s -> pBdr.BottomBorder <- borderSideToBottom s)
+        b.Left |> Option.iter (fun s -> pBdr.LeftBorder <- borderSideToLeft s)
+        b.Right |> Option.iter (fun s -> pBdr.RightBorder <- borderSideToRight s)
+        pBdr
+
+    let paragraphBordersOfW (pBdr: Wordprocessing.ParagraphBorders) : BorderStyle =
+        { Top = pBdr.TopBorder |> Option.ofObj |> Option.map borderSideOfTop
+          Bottom = pBdr.BottomBorder |> Option.ofObj |> Option.map borderSideOfBottom
+          Left = pBdr.LeftBorder |> Option.ofObj |> Option.map borderSideOfLeft
+          Right = pBdr.RightBorder |> Option.ofObj |> Option.map borderSideOfRight }
+
     // --- Run / paragraph properties --------------------------------------------------------
 
     let runPropertiesOf (style: RunStyle option) (styleId: string option) : Wordprocessing.RunProperties option =
@@ -160,7 +239,16 @@ module StyleRegistry =
                         | Superscript -> Wordprocessing.VerticalPositionValues.Superscript
                         | Subscript -> Wordprocessing.VerticalPositionValues.Subscript
 
-                    rPr.VerticalTextAlignment <- Wordprocessing.VerticalTextAlignment(Val = EnumValue v)))
+                    rPr.VerticalTextAlignment <- Wordprocessing.VerticalTextAlignment(Val = EnumValue v))
+
+                if s.SmallCaps then
+                    rPr.SmallCaps <- Wordprocessing.SmallCaps()
+
+                if s.AllCaps then
+                    rPr.Caps <- Wordprocessing.Caps()
+
+                if s.Hidden then
+                    rPr.Vanish <- Wordprocessing.Vanish())
 
             Some rPr
 
@@ -180,6 +268,9 @@ module StyleRegistry =
                 || isNull rPr.Color |> not
                 || isNull rPr.Highlight |> not
                 || isNull rPr.VerticalTextAlignment |> not
+                || isNull rPr.SmallCaps |> not
+                || isNull rPr.Caps |> not
+                || isNull rPr.Vanish |> not
 
             if not hasAny then
                 None
@@ -210,7 +301,10 @@ module StyleRegistry =
                                 rPr.VerticalTextAlignment.Val
                                 |> Option.ofObj
                                 |> Option.map (fun v ->
-                                    if v.Value = Wordprocessing.VerticalPositionValues.Superscript then Superscript else Subscript) }
+                                    if v.Value = Wordprocessing.VerticalPositionValues.Superscript then Superscript else Subscript)
+                        SmallCaps = not (isNull rPr.SmallCaps)
+                        AllCaps = not (isNull rPr.Caps)
+                        Hidden = not (isNull rPr.Vanish) }
 
     let styleIdOfProperties (rPr: Wordprocessing.RunProperties option) : string option =
         match rPr with
@@ -289,7 +383,12 @@ module StyleRegistry =
                     pPr.KeepNext <- Wordprocessing.KeepNext()
 
                 if f.PageBreakBefore then
-                    pPr.PageBreakBefore <- Wordprocessing.PageBreakBefore())
+                    pPr.PageBreakBefore <- Wordprocessing.PageBreakBefore()
+
+                f.Borders |> Option.iter (fun b -> pPr.ParagraphBorders <- paragraphBordersToW b)
+
+                f.Shading
+                |> Option.iter (fun c -> pPr.Shading <- Wordprocessing.Shading(Val = EnumValue Wordprocessing.ShadingPatternValues.Clear, Color = StringValue "auto", Fill = StringValue(colorToHex c))))
 
             Some pPr
 
@@ -303,6 +402,8 @@ module StyleRegistry =
                 || isNull pPr.Indentation |> not
                 || isNull pPr.KeepNext |> not
                 || isNull pPr.PageBreakBefore |> not
+                || isNull pPr.ParagraphBorders |> not
+                || isNull pPr.Shading |> not
 
             if not hasAny then
                 None
@@ -361,7 +462,9 @@ module StyleRegistry =
                       LineSpacing = lineSpacing
                       Indentation = if isNull pPr.Indentation then None else Some(indentationOfW pPr.Indentation)
                       KeepWithNext = not (isNull pPr.KeepNext)
-                      PageBreakBefore = not (isNull pPr.PageBreakBefore) }
+                      PageBreakBefore = not (isNull pPr.PageBreakBefore)
+                      Borders = if isNull pPr.ParagraphBorders then None else Some(paragraphBordersOfW pPr.ParagraphBorders)
+                      Shading = if isNull pPr.Shading then None else pPr.Shading.Fill |> Option.ofObj |> Option.map (fun v -> colorOfHex v.Value) }
 
     let styleIdOfParagraphProperties (pPr: Wordprocessing.ParagraphProperties option) : string option =
         match pPr with
