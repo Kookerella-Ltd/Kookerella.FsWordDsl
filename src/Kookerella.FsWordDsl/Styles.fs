@@ -1,0 +1,179 @@
+namespace Kookerella.FsWordDsl
+
+/// Character (run) and paragraph formatting. Unlike Excel's `CellStyle` - which the
+/// interpreter interns into a shared, indexed stylesheet - WordprocessingML writes direct
+/// run/paragraph formatting (`w:rPr`/`w:pPr`) inline on each element, not through an index.
+/// So there is no dedup/interning concept mirrored here; `Interpreter/StyleRegistry.fs`'s
+/// job is narrower (see its own doc comment).
+[<AutoOpen>]
+module Styles =
+
+    /// A run's color. Only `Rgb` is modeled - WordprocessingML also allows theme colors on
+    /// a run, which this DSL does not resolve or author, the same documented gap Excel has
+    /// for `Theme`/`Indexed` colors. `Auto` matches OOXML's own "let the reader/theme decide"
+    /// value (the default for new text in Word).
+    type Color =
+        | Rgb of red: byte * green: byte * blue: byte
+        | Auto
+
+    module Color =
+        let black = Rgb(0uy, 0uy, 0uy)
+        let white = Rgb(255uy, 255uy, 255uy)
+        let red = Rgb(255uy, 0uy, 0uy)
+        let green = Rgb(0uy, 128uy, 0uy)
+        let blue = Rgb(0uy, 0uy, 255uy)
+        let yellow = Rgb(255uy, 255uy, 0uy)
+
+    /// WordprocessingML's `w:highlight` element only accepts this fixed, enumerated palette
+    /// (Word's own "text highlight color" swatch) - unlike `Color`, arbitrary RGB is not
+    /// valid here, so this is deliberately its own closed type rather than reusing `Color`.
+    type HighlightColor =
+        | HlYellow
+        | HlGreen
+        | HlCyan
+        | HlMagenta
+        | HlBlue
+        | HlRed
+        | HlDarkBlue
+        | HlDarkCyan
+        | HlDarkGreen
+        | HlDarkMagenta
+        | HlDarkRed
+        | HlDarkYellow
+        | HlDarkGray
+        | HlLightGray
+        | HlBlack
+
+    type UnderlineStyle =
+        | SingleUnderline
+        | DoubleUnderline
+        | ThickUnderline
+        | DottedUnderline
+        | DashedUnderline
+        | WavyUnderline
+        /// Preserves any other raw OOXML `w:u/@w:val` so reading and re-writing an existing
+        /// document round-trips even for underline kinds this DSL doesn't author itself -
+        /// same escape-hatch convention as Excel's `BorderLineStyle.Other`.
+        | OtherUnderline of string
+
+    type VerticalPosition =
+        | Superscript
+        | Subscript
+
+    /// Direct/inline character formatting - written straight onto the run's own `w:rPr`,
+    /// never interned or deduplicated (see this module's own doc comment).
+    type RunStyle =
+        { FontFamily: string option
+          /// Points.
+          Size: float option
+          Bold: bool
+          Italic: bool
+          Underline: UnderlineStyle option
+          Strikethrough: bool
+          Color: Color option
+          Highlight: HighlightColor option
+          VerticalPosition: VerticalPosition option }
+
+        static member Default =
+            { FontFamily = None
+              Size = None
+              Bold = false
+              Italic = false
+              Underline = None
+              Strikethrough = false
+              Color = None
+              Highlight = None
+              VerticalPosition = None }
+
+    type ParagraphAlignment =
+        | AlignLeft
+        | AlignCenter
+        | AlignRight
+        | AlignJustify
+
+    /// All fields are in points. `FirstLine`/`Hanging` are mutually meaningful alternatives
+    /// (Word's own `w:ind` allows both `firstLine` and `hanging` attributes, but setting
+    /// both is contradictory in practice) - this DSL doesn't prevent setting both, it just
+    /// writes whichever are present, the same "trust the caller" posture Excel takes on its
+    /// own optional style fields.
+    type Indentation =
+        { Left: float option
+          Right: float option
+          FirstLine: float option
+          Hanging: float option }
+
+        static member None =
+            { Left = None
+              Right = None
+              FirstLine = None
+              Hanging = None }
+
+    type LineSpacingRule =
+        | SingleSpacing
+        | OnePointFiveSpacing
+        | DoubleSpacing
+        /// Points - line height is at least this tall, growing to fit taller content.
+        | AtLeastSpacing of points: float
+        /// Points - line height is fixed exactly, regardless of content.
+        | ExactlySpacing of points: float
+        /// A multiple of single line spacing, e.g. `Multiple 1.15`.
+        | MultipleSpacing of factor: float
+
+    /// Direct/inline paragraph formatting - written straight onto the paragraph's own
+    /// `w:pPr`. `StyleId` (on `Paragraph` itself, not here) supplies the named-style layer;
+    /// this record is the override/direct-formatting layer on top of it, same relationship
+    /// direct cell formatting has to (the non-existent, for Excel) named cell styles.
+    type ParagraphFormat =
+        { Alignment: ParagraphAlignment option
+          SpacingBefore: float option
+          SpacingAfter: float option
+          LineSpacing: LineSpacingRule option
+          Indentation: Indentation option
+          KeepWithNext: bool
+          PageBreakBefore: bool }
+
+        static member Default =
+            { Alignment = None
+              SpacingBefore = None
+              SpacingAfter = None
+              LineSpacing = None
+              Indentation = None
+              KeepWithNext = false
+              PageBreakBefore = false }
+
+    /// WordprocessingML defines many more border styles than this names explicitly (dashed
+    /// variants, triple lines, 3-D effects, art borders, ...); `OtherLine` preserves the raw
+    /// OOXML style name so reading and re-writing an existing document round-trips even for
+    /// a style this DSL doesn't author itself - same convention as Excel's
+    /// `BorderLineStyle.Other`. Deliberately not named `Single`/`Thick`/`Double` bare (which
+    /// would collide with `LineSpacingRule`'s cases under `[<AutoOpen>]`).
+    type BorderLineStyle =
+        | SingleLine
+        | ThickLine
+        | DoubleLine
+        | DottedLine
+        | DashedLine
+        | WaveLine
+        | OtherLine of string
+
+    /// `Width` is in points (OOXML's own border `sz` attribute is in eighths of a point;
+    /// `Interpreter/Writer.fs` does that conversion) - `None` uses Word's own default weight.
+    type BorderSide =
+        { Style: BorderLineStyle
+          Width: float option
+          Color: Color option }
+
+    /// Reused for both paragraph borders (`w:pBdr`) and table/cell borders (`w:tblBorders`/
+    /// `w:tcBorders`) - same shape as Excel's `BorderStyle`, which is reused across cell and
+    /// conditional-formatting borders the same way.
+    type BorderStyle =
+        { Left: BorderSide option
+          Right: BorderSide option
+          Top: BorderSide option
+          Bottom: BorderSide option }
+
+        static member None =
+            { Left = None
+              Right = None
+              Top = None
+              Bottom = None }

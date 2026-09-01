@@ -1,0 +1,537 @@
+namespace Kookerella.FsWordDsl.Interpreter
+
+open System
+open System.IO
+open DocumentFormat.OpenXml
+open DocumentFormat.OpenXml.Packaging
+open Kookerella.FsWordDsl
+open Kookerella.FsWordDsl.Interpreter.StyleRegistry
+open Kookerella.FsWordDsl.Interpreter.ImageWriter
+
+/// DSL -> OOXML. The interpreter half of this DSL's round-trip pair (`Reader` is the
+/// other) - never `open`s `DocumentFormat.OpenXml.Wordprocessing` directly (F# doesn't allow
+/// aliasing a namespace as a module, so `open DocumentFormat.OpenXml` plus the
+/// `Wordprocessing.XXX` qualified form is used throughout instead - the nested namespace's
+/// own short name resolves once its parent is open) so the DSL's own natural type/case names
+/// (`Paragraph`, `Table`, `Hyperlink`, `Bookmark`, `Comment`, ...) stay usable unqualified
+/// with no collision - see `Model.fs`'s own note on this.
+module Writer =
+
+    let private pointsToTwips (pts: float) : int = int (Math.Round(pts * 20.0))
+    let private pointsToTwipsU (pts: float) : uint32 = uint32 (Math.Round(pts * 20.0))
+
+    /// Mutable state threaded through one `writeDocument` call - never shared across calls.
+    /// `NextBookmarkId`/`NextCommentId`/`NextDrawingId` only need to be unique within this
+    /// one document (they're OOXML's own internal ids, not anything the DSL exposes back to
+    /// a caller), so a simple incrementing counter is enough, same idea as `ImageWriter`'s
+    /// own doc comment on `drawingId`.
+    type private Ctx =
+        { MainPart: MainDocumentPart
+          Comments: ResizeArray<Wordprocessing.Comment>
+          mutable NextBookmarkId: int
+          mutable NextCommentId: int
+          mutable NextDrawingId: uint32
+          /// Whether ANY section uses an `Even` header/footer - `<w:evenAndOddHeaders/>` is
+          /// a document-wide `settings.xml` flag, not a per-section `sectPr` child, unlike
+          /// `<w:titlePg/>` (which genuinely is per-section).
+          mutable NeedsEvenAndOddHeaders: bool }
+
+    // --- Numbering ------------------------------------------------------------------------
+
+    let private numberFormatKindToW (k: NumberFormatKind) : Wordprocessing.NumberFormatValues =
+        match k with
+        | BulletFormat _ -> Wordprocessing.NumberFormatValues.Bullet
+        | DecimalFormat -> Wordprocessing.NumberFormatValues.Decimal
+        | LowerLetterFormat -> Wordprocessing.NumberFormatValues.LowerLetter
+        | UpperLetterFormat -> Wordprocessing.NumberFormatValues.UpperLetter
+        | LowerRomanFormat -> Wordprocessing.NumberFormatValues.LowerRoman
+        | UpperRomanFormat -> Wordprocessing.NumberFormatValues.UpperRoman
+        | OtherFormat raw -> Wordprocessing.NumberFormatValues raw
+
+    let private levelToW (ilvl: int) (level: ListLevel) : Wordprocessing.Level =
+        let lvl = Wordprocessing.Level(LevelIndex = Int32Value ilvl)
+        lvl.NumberingFormat <- Wordprocessing.NumberingFormat(Val = EnumValue(numberFormatKindToW level.Format))
+        lvl.LevelText <- Wordprocessing.LevelText(Val = StringValue level.Text)
+        lvl.LevelJustification <- Wordprocessing.LevelJustification(Val = EnumValue Wordprocessing.LevelJustificationValues.Left)
+        level.StartAt |> Option.iter (fun s -> lvl.StartNumberingValue <- Wordprocessing.StartNumberingValue(Val = Int32Value s))
+
+        if level.IndentLeft.IsSome || level.HangingIndent.IsSome then
+            let ind = Wordprocessing.Indentation()
+            level.IndentLeft |> Option.iter (fun v -> ind.Left <- StringValue(string (pointsToTwips v)))
+            level.HangingIndent |> Option.iter (fun v -> ind.Hanging <- StringValue(string (pointsToTwips v)))
+            lvl.PreviousParagraphProperties <- Wordprocessing.PreviousParagraphProperties(Indentation = ind)
+
+        match level.Format with
+        | BulletFormat(_, font) ->
+            lvl.NumberingSymbolRunProperties <- Wordprocessing.NumberingSymbolRunProperties(RunFonts = Wordprocessing.RunFonts(Ascii = StringValue font, HighAnsi = StringValue font))
+        | _ -> ()
+
+        lvl
+
+    /// `AbstractNum`s must all precede `NumberingInstance`s in `numbering.xml` - reuses each
+    /// definition's own `Id` for both the abstract numbering id and the instance's `numId`
+    /// (this DSL collapses Word's own abstract/instance indirection away, see `Numbering.fs`'s
+    /// own doc comment).
+    let private numberingToOpenXml (definitions: NumberingDefinition list) : Wordprocessing.Numbering =
+        let abstractNums =
+            definitions
+            |> List.map (fun d ->
+                let absNum = Wordprocessing.AbstractNum(AbstractNumberId = Int32Value d.Id)
+                d.Levels |> List.iteri (fun i lvl -> absNum.AppendChild(levelToW i lvl) |> ignore)
+                absNum :> OpenXmlElement)
+
+        let instances =
+            definitions
+            |> List.map (fun d ->
+                let inst = Wordprocessing.NumberingInstance(NumberID = Int32Value d.Id)
+                inst.AppendChild(Wordprocessing.AbstractNumId(Val = Int32Value d.Id)) |> ignore
+                inst :> OpenXmlElement)
+
+        Wordprocessing.Numbering(abstractNums @ instances)
+
+    // --- Borders --------------------------------------------------------------------------
+
+    let private borderSideToTop (side: BorderSide) : Wordprocessing.TopBorder =
+        Wordprocessing.TopBorder(Val = EnumValue(borderLineStyleToW side.Style), Size = UInt32Value(borderSideWidthEighths side), Space = UInt32Value 0u)
+        |> fun b -> side.Color |> Option.iter (fun c -> b.Color <- StringValue(colorToHex c)); b
+
+    let private borderSideToBottom (side: BorderSide) : Wordprocessing.BottomBorder =
+        Wordprocessing.BottomBorder(Val = EnumValue(borderLineStyleToW side.Style), Size = UInt32Value(borderSideWidthEighths side), Space = UInt32Value 0u)
+        |> fun b -> side.Color |> Option.iter (fun c -> b.Color <- StringValue(colorToHex c)); b
+
+    let private borderSideToLeft (side: BorderSide) : Wordprocessing.LeftBorder =
+        Wordprocessing.LeftBorder(Val = EnumValue(borderLineStyleToW side.Style), Size = UInt32Value(borderSideWidthEighths side), Space = UInt32Value 0u)
+        |> fun b -> side.Color |> Option.iter (fun c -> b.Color <- StringValue(colorToHex c)); b
+
+    let private borderSideToRight (side: BorderSide) : Wordprocessing.RightBorder =
+        Wordprocessing.RightBorder(Val = EnumValue(borderLineStyleToW side.Style), Size = UInt32Value(borderSideWidthEighths side), Space = UInt32Value 0u)
+        |> fun b -> side.Color |> Option.iter (fun c -> b.Color <- StringValue(colorToHex c)); b
+
+    let private borderSideToInsideH (side: BorderSide) : Wordprocessing.InsideHorizontalBorder =
+        Wordprocessing.InsideHorizontalBorder(Val = EnumValue(borderLineStyleToW side.Style), Size = UInt32Value(borderSideWidthEighths side), Space = UInt32Value 0u)
+        |> fun b -> side.Color |> Option.iter (fun c -> b.Color <- StringValue(colorToHex c)); b
+
+    let private borderSideToInsideV (side: BorderSide) : Wordprocessing.InsideVerticalBorder =
+        Wordprocessing.InsideVerticalBorder(Val = EnumValue(borderLineStyleToW side.Style), Size = UInt32Value(borderSideWidthEighths side), Space = UInt32Value 0u)
+        |> fun b -> side.Color |> Option.iter (fun c -> b.Color <- StringValue(colorToHex c)); b
+
+    let private tableBordersToW (b: TableBorders) : Wordprocessing.TableBorders =
+        let tb = Wordprocessing.TableBorders()
+        b.Outer.Top |> Option.iter (fun s -> tb.TopBorder <- borderSideToTop s)
+        b.Outer.Bottom |> Option.iter (fun s -> tb.BottomBorder <- borderSideToBottom s)
+        b.Outer.Left |> Option.iter (fun s -> tb.LeftBorder <- borderSideToLeft s)
+        b.Outer.Right |> Option.iter (fun s -> tb.RightBorder <- borderSideToRight s)
+        b.InsideHorizontal |> Option.iter (fun s -> tb.InsideHorizontalBorder <- borderSideToInsideH s)
+        b.InsideVertical |> Option.iter (fun s -> tb.InsideVerticalBorder <- borderSideToInsideV s)
+        tb
+
+    let private tableCellBordersToW (b: TableBorders) : Wordprocessing.TableCellBorders =
+        let tcb = Wordprocessing.TableCellBorders()
+        b.Outer.Top |> Option.iter (fun s -> tcb.TopBorder <- borderSideToTop s)
+        b.Outer.Bottom |> Option.iter (fun s -> tcb.BottomBorder <- borderSideToBottom s)
+        b.Outer.Left |> Option.iter (fun s -> tcb.LeftBorder <- borderSideToLeft s)
+        b.Outer.Right |> Option.iter (fun s -> tcb.RightBorder <- borderSideToRight s)
+        tcb
+
+    // --- Inline content ---------------------------------------------------------------------
+
+    let private textRun (text: string) (style: RunStyle option) (styleId: string option) : Wordprocessing.Run =
+        let r = Wordprocessing.Run()
+        runPropertiesOf style styleId |> Option.iter (fun p -> r.RunProperties <- p)
+        let t = Wordprocessing.Text(text)
+        if text.StartsWith(" ") || text.EndsWith(" ") || text.Contains("\t") then
+            t.Space <- EnumValue SpaceProcessingModeValues.Preserve
+        r.AppendChild(t) |> ignore
+        r
+
+    /// A `Wordprocessing.Run` wrapping exactly one child. NOT `Wordprocessing.Run(child)`
+    /// (a single-argument constructor call) - F# always resolves that to the SDK's
+    /// `IEnumerable<OpenXmlElement>` constructor overload rather than "one child to wrap"
+    /// (every `OpenXmlCompositeElement`, including leaf-ish ones like `Break`/`TabChar`,
+    /// implements that interface over its own children), which silently produces an EMPTY
+    /// run for a childless leaf element, or throws ("part of a tree") for a composite one
+    /// that already has children - see this module's own note by `Document`'s construction
+    /// below for the same gotcha at the top level. `AppendChild` sidesteps it entirely.
+    let private runWith (child: OpenXmlElement) : Wordprocessing.Run =
+        let r = Wordprocessing.Run()
+        r.AppendChild(child) |> ignore
+        r
+
+    let rec private inlineToElements (ctx: Ctx) (inl: Inline) : OpenXmlElement list =
+        match inl with
+        | Run(text, style, styleId) -> [ textRun text style styleId :> OpenXmlElement ]
+        | LineBreak -> [ runWith (Wordprocessing.Break(Type = EnumValue Wordprocessing.BreakValues.TextWrapping)) :> OpenXmlElement ]
+        | Tab -> [ runWith (Wordprocessing.TabChar()) :> OpenXmlElement ]
+        | PageBreak -> [ runWith (Wordprocessing.Break(Type = EnumValue Wordprocessing.BreakValues.Page)) :> OpenXmlElement ]
+        | Image img ->
+            let id = ctx.NextDrawingId
+            ctx.NextDrawingId <- id + 1u
+            [ runWith (addImage ctx.MainPart id img) :> OpenXmlElement ]
+        | Hyperlink(target, runs, tooltip) ->
+            let children = runs |> List.collect (inlineToElements ctx)
+
+            let hl =
+                match target with
+                | ExternalUrl url ->
+                    let rel = ctx.MainPart.AddHyperlinkRelationship(Uri(url, UriKind.RelativeOrAbsolute), true)
+                    Wordprocessing.Hyperlink(Id = StringValue rel.Id, History = OnOffValue true)
+                | InternalBookmark name -> Wordprocessing.Hyperlink(Anchor = StringValue name, History = OnOffValue true)
+
+            tooltip |> Option.iter (fun tt -> hl.Tooltip <- StringValue tt)
+            children |> List.iter (hl.AppendChild >> ignore)
+            [ hl :> OpenXmlElement ]
+        | Bookmark(name, content) ->
+            let id = ctx.NextBookmarkId
+            ctx.NextBookmarkId <- id + 1
+            let startEl = Wordprocessing.BookmarkStart(Id = StringValue(string id), Name = StringValue name) :> OpenXmlElement
+            let endEl = Wordprocessing.BookmarkEnd(Id = StringValue(string id)) :> OpenXmlElement
+            let contentEls = content |> List.collect (inlineToElements ctx)
+            [ startEl ] @ contentEls @ [ endEl ]
+        | Comment(author, initials, date, text, content) ->
+            let id = ctx.NextCommentId
+            ctx.NextCommentId <- id + 1
+            let idStr = string id
+
+            let cmt = Wordprocessing.Comment(Id = StringValue idStr, Author = StringValue author)
+            cmt.Date <- DateTimeValue(defaultArg date DateTime.Now)
+            initials |> Option.iter (fun i -> cmt.Initials <- StringValue i)
+            let commentPara = Wordprocessing.Paragraph()
+            commentPara.AppendChild(runWith (Wordprocessing.Text(text))) |> ignore
+            cmt.AppendChild(commentPara) |> ignore
+            ctx.Comments.Add(cmt)
+
+            let startEl = Wordprocessing.CommentRangeStart(Id = StringValue idStr) :> OpenXmlElement
+            let endEl = Wordprocessing.CommentRangeEnd(Id = StringValue idStr) :> OpenXmlElement
+            let refRun = runWith (Wordprocessing.CommentReference(Id = StringValue idStr)) :> OpenXmlElement
+            let contentEls = content |> List.collect (inlineToElements ctx)
+            [ startEl ] @ contentEls @ [ endEl; refRun ]
+        | Field(instruction, cachedResult) ->
+            let sf = Wordprocessing.SimpleField(Instruction = StringValue instruction)
+            cachedResult |> Option.iter (fun c -> sf.AppendChild(runWith (Wordprocessing.Text(c))) |> ignore)
+            [ sf :> OpenXmlElement ]
+
+    // --- Paragraphs / tables ----------------------------------------------------------------
+
+    let private paragraphPropertiesFull
+        (styleId: string option)
+        (format: ParagraphFormat option)
+        (numbering: (int * int) option)
+        : Wordprocessing.ParagraphProperties option =
+        let basePr = paragraphPropertiesOf styleId format
+
+        match numbering with
+        | None -> basePr
+        | Some(numId, level) ->
+            let pPr = basePr |> Option.defaultValue (Wordprocessing.ParagraphProperties())
+            pPr.NumberingProperties <- Wordprocessing.NumberingProperties(Wordprocessing.NumberingLevelReference(Val = Int32Value level), Wordprocessing.NumberingId(Val = Int32Value numId))
+            Some pPr
+
+    let private paragraphToW (ctx: Ctx) (p: Paragraph) : Wordprocessing.Paragraph =
+        let para = Wordprocessing.Paragraph()
+        paragraphPropertiesFull p.StyleId p.Format p.Numbering |> Option.iter (fun pPr -> para.ParagraphProperties <- pPr)
+        p.Inlines |> List.collect (inlineToElements ctx) |> List.iter (para.AppendChild >> ignore)
+        para
+
+    let rec private blockToW (ctx: Ctx) (block: Block) : OpenXmlElement =
+        match block with
+        | ParagraphBlock p -> paragraphToW ctx p :> OpenXmlElement
+        | TableBlock t -> tableEntryToW ctx t :> OpenXmlElement
+
+    and private tableCellToW (ctx: Ctx) (colWidthTwips: int) (cell: TableCell) : Wordprocessing.TableCell =
+        let tc = Wordprocessing.TableCell()
+        let tcPr = Wordprocessing.TableCellProperties()
+
+        let widthTwips =
+            cell.Props.Width |> Option.map pointsToTwips |> Option.defaultValue colWidthTwips
+
+        tcPr.TableCellWidth <- Wordprocessing.TableCellWidth(Type = EnumValue Wordprocessing.TableWidthUnitValues.Dxa, Width = StringValue(string widthTwips))
+        cell.Props.GridSpan |> Option.iter (fun n -> tcPr.GridSpan <- Wordprocessing.GridSpan(Val = Int32Value n))
+
+        cell.Props.VerticalMerge
+        |> Option.iter (fun vm ->
+            let v =
+                match vm with
+                | RestartMerge -> Wordprocessing.MergedCellValues.Restart
+                | ContinueMerge -> Wordprocessing.MergedCellValues.Continue
+
+            tcPr.VerticalMerge <- Wordprocessing.VerticalMerge(Val = EnumValue v))
+
+        cell.Props.Shading
+        |> Option.iter (fun c -> tcPr.Shading <- Wordprocessing.Shading(Val = EnumValue Wordprocessing.ShadingPatternValues.Clear, Color = StringValue "auto", Fill = StringValue(colorToHex c)))
+
+        cell.Props.Borders |> Option.iter (fun b -> tcPr.TableCellBorders <- tableCellBordersToW b)
+        tc.TableCellProperties <- tcPr
+
+        if cell.Content.IsEmpty then
+            tc.AppendChild(Wordprocessing.Paragraph()) |> ignore
+        else
+            cell.Content |> List.iter (fun b -> tc.AppendChild(blockToW ctx b) |> ignore)
+
+        tc
+
+    and private tableEntryToW (ctx: Ctx) (t: TableEntry) : Wordprocessing.Table =
+        let table = Wordprocessing.Table()
+        let tblPr = Wordprocessing.TableProperties()
+
+        t.Style
+        |> Option.iter (fun s ->
+            tblPr.TableStyle <- Wordprocessing.TableStyle(Val = StringValue s.Name)
+
+            let look = Wordprocessing.TableLook(Val = HexBinaryValue "0000")
+            look.FirstRow <- OnOffValue s.FirstRowBanding
+            look.LastRow <- OnOffValue s.LastRowBanding
+            look.NoHorizontalBand <- OnOffValue(not s.BandedRows)
+            look.NoVerticalBand <- OnOffValue(not s.BandedColumns)
+            tblPr.TableLook <- look)
+
+        t.Borders |> Option.iter (fun b -> tblPr.TableBorders <- tableBordersToW b)
+        table.AppendChild(tblPr) |> ignore
+
+        let widthsTwips = t.ColumnWidths |> List.map pointsToTwips
+        let grid = Wordprocessing.TableGrid(widthsTwips |> List.map (fun w -> Wordprocessing.GridColumn(Width = StringValue(string w)) :> OpenXmlElement))
+        table.AppendChild(grid) |> ignore
+
+        t.Rows
+        |> List.iter (fun row ->
+            let tr = Wordprocessing.TableRow()
+            row.Height |> Option.iter (fun h -> tr.AppendChild(Wordprocessing.TableRowProperties(Wordprocessing.TableRowHeight(Val = UInt32Value(pointsToTwipsU h)))) |> ignore)
+
+            row.Cells
+            |> List.iteri (fun i cell ->
+                let colWidth = if i < widthsTwips.Length then widthsTwips.[i] else 0
+                tr.AppendChild(tableCellToW ctx colWidth cell) |> ignore)
+
+            table.AppendChild(tr) |> ignore)
+
+        table
+
+    // --- Page setup / headers & footers -----------------------------------------------------
+
+    let private namedPageSizeTwipsPortrait (size: PageSize) : int * int =
+        match size with
+        | Letter -> 12240, 15840
+        | Legal -> 12240, 20160
+        | A4 -> 11906, 16838
+        | A3 -> 16838, 23811
+        | OtherPageSize _ -> 12240, 15840
+        | CustomPageSize(w, h) -> pointsToTwips w, pointsToTwips h
+
+    let private pageSizeToW (size: PageSize) (orientation: PageOrientation) : Wordprocessing.PageSize =
+        let w, h = namedPageSizeTwipsPortrait size
+        let w, h = if orientation = Landscape then h, w else w, h
+        let ps = Wordprocessing.PageSize(Width = UInt32Value(uint32 w), Height = UInt32Value(uint32 h))
+
+        if orientation = Landscape then
+            ps.Orient <- EnumValue Wordprocessing.PageOrientationValues.Landscape
+
+        match size with
+        | OtherPageSize code -> ps.Code <- UInt16Value(uint16 code)
+        | _ -> ()
+
+        ps
+
+    let private pageMarginsToW (m: PageMargins) : Wordprocessing.PageMargin =
+        Wordprocessing.PageMargin(
+            Top = Int32Value(pointsToTwips m.Top),
+            Bottom = Int32Value(pointsToTwips m.Bottom),
+            Left = UInt32Value(pointsToTwipsU m.Left),
+            Right = UInt32Value(pointsToTwipsU m.Right),
+            Header = UInt32Value(pointsToTwipsU m.Header),
+            Footer = UInt32Value(pointsToTwipsU m.Footer),
+            Gutter = UInt32Value(pointsToTwipsU m.Gutter)
+        )
+
+    /// Adds a `HeaderPart`/`FooterPart` for one `Block list`, returning the relationship id
+    /// a `HeaderReference`/`FooterReference` needs.
+    let private addHeaderPart (ctx: Ctx) (blocks: Block list) : string =
+        let part = ctx.MainPart.AddNewPart<HeaderPart>()
+        part.Header <- Wordprocessing.Header(blocks |> List.map (blockToW ctx))
+        ctx.MainPart.GetIdOfPart(part)
+
+    let private addFooterPart (ctx: Ctx) (blocks: Block list) : string =
+        let part = ctx.MainPart.AddNewPart<FooterPart>()
+        part.Footer <- Wordprocessing.Footer(blocks |> List.map (blockToW ctx))
+        ctx.MainPart.GetIdOfPart(part)
+
+    /// Builds the `<w:sectPr>` for one section, wiring header/footer relationship ids and
+    /// the auto-flag(s) they each require (see `Model.HeaderFooterSet`'s own doc comment).
+    let private sectionPropertiesToW (ctx: Ctx) (props: SectionProperties) : Wordprocessing.SectionProperties =
+        let sectPr = Wordprocessing.SectionProperties()
+        let mutable titlePage = false
+
+        props.Header
+        |> Option.iter (fun h ->
+            h.First |> Option.iter (fun blocks -> sectPr.AppendChild(Wordprocessing.HeaderReference(Type = EnumValue Wordprocessing.HeaderFooterValues.First, Id = StringValue(addHeaderPart ctx blocks))) |> ignore; titlePage <- true)
+            h.Default |> Option.iter (fun blocks -> sectPr.AppendChild(Wordprocessing.HeaderReference(Type = EnumValue Wordprocessing.HeaderFooterValues.Default, Id = StringValue(addHeaderPart ctx blocks))) |> ignore)
+            h.Even |> Option.iter (fun blocks -> sectPr.AppendChild(Wordprocessing.HeaderReference(Type = EnumValue Wordprocessing.HeaderFooterValues.Even, Id = StringValue(addHeaderPart ctx blocks))) |> ignore; ctx.NeedsEvenAndOddHeaders <- true))
+
+        props.Footer
+        |> Option.iter (fun f ->
+            f.First |> Option.iter (fun blocks -> sectPr.AppendChild(Wordprocessing.FooterReference(Type = EnumValue Wordprocessing.HeaderFooterValues.First, Id = StringValue(addFooterPart ctx blocks))) |> ignore; titlePage <- true)
+            f.Default |> Option.iter (fun blocks -> sectPr.AppendChild(Wordprocessing.FooterReference(Type = EnumValue Wordprocessing.HeaderFooterValues.Default, Id = StringValue(addFooterPart ctx blocks))) |> ignore)
+            f.Even |> Option.iter (fun blocks -> sectPr.AppendChild(Wordprocessing.FooterReference(Type = EnumValue Wordprocessing.HeaderFooterValues.Even, Id = StringValue(addFooterPart ctx blocks))) |> ignore; ctx.NeedsEvenAndOddHeaders <- true))
+
+        sectPr.AppendChild(pageSizeToW props.PageSize props.Orientation) |> ignore
+        sectPr.AppendChild(pageMarginsToW props.Margins) |> ignore
+
+        if props.Columns > 1 then
+            sectPr.AppendChild(Wordprocessing.Columns(EqualWidth = OnOffValue true, ColumnCount = Int16Value(int16 props.Columns))) |> ignore
+
+        props.PageNumberStart |> Option.iter (fun n -> sectPr.AppendChild(Wordprocessing.PageNumberType(Start = Int32Value n)) |> ignore)
+
+        if titlePage then
+            sectPr.AppendChild(Wordprocessing.TitlePage()) |> ignore
+
+        sectPr
+
+    // --- Document protection ---------------------------------------------------------------
+
+    let private editRestrictionToW (e: EditRestriction) : Wordprocessing.DocumentProtectionValues =
+        match e with
+        | ReadOnlyRestriction -> Wordprocessing.DocumentProtectionValues.ReadOnly
+        | CommentsOnlyRestriction -> Wordprocessing.DocumentProtectionValues.Comments
+        | TrackedChangesOnlyRestriction -> Wordprocessing.DocumentProtectionValues.TrackedChanges
+        | FormsOnlyRestriction -> Wordprocessing.DocumentProtectionValues.Forms
+
+    /// The modern salted-iterated-SHA512 password scheme (ECMA-376 `legacyPassword`
+    /// hashing) - simpler to implement correctly than Excel's classic XOR hash and the
+    /// scheme current Word versions themselves default to. Like Excel's own password
+    /// fields, this never round-trips back to plaintext (see `Protection.DocumentProtection.
+    /// Password`'s own doc comment) - unverified against real Word (no Word available in
+    /// this environment to confirm acceptance), same "verify separately" caution Excel gives
+    /// its own Sparklines feature.
+    let private hashPassword (password: string) : string * string * int =
+        let salt = Array.zeroCreate<byte> 16
+        System.Security.Cryptography.RandomNumberGenerator.Fill(salt)
+        let spinCount = 100000
+        use sha = System.Security.Cryptography.SHA512.Create()
+        let pwdBytes = System.Text.Encoding.Unicode.GetBytes(password)
+        let mutable h = sha.ComputeHash(Array.append salt pwdBytes)
+
+        for i in 0 .. spinCount - 1 do
+            let iterBytes = BitConverter.GetBytes(i)
+            h <- sha.ComputeHash(Array.append iterBytes h)
+
+        Convert.ToBase64String(h), Convert.ToBase64String(salt), spinCount
+
+    let private documentProtectionToW (dp: DocumentProtection) : Wordprocessing.DocumentProtection option =
+        match dp.Edit with
+        | None -> None
+        | Some edit ->
+            let el = Wordprocessing.DocumentProtection(Edit = EnumValue(editRestrictionToW edit), Enforcement = OnOffValue true)
+
+            dp.Password
+            |> Option.iter (fun pwd ->
+                let hash, salt, spin = hashPassword pwd
+                el.CryptographicProviderType <- EnumValue Wordprocessing.CryptProviderValues.RsaAdvancedEncryptionStandard
+                el.CryptographicAlgorithmClass <- EnumValue Wordprocessing.CryptAlgorithmClassValues.Hash
+                el.CryptographicAlgorithmType <- EnumValue Wordprocessing.CryptAlgorithmValues.TypeAny
+                el.CryptographicAlgorithmSid <- Int32Value 14 // SHA-512
+                el.CryptographicSpinCount <- UInt32Value(uint32 spin)
+                el.HashValue <- Base64BinaryValue hash
+                el.SaltValue <- Base64BinaryValue salt)
+
+            Some el
+
+    // --- Top-level orchestration -------------------------------------------------------------
+
+    /// A section's own `SectionProperties` is embedded either as the body's own trailing
+    /// `<w:sectPr>` (the last section) or as a `<w:sectPr>` inside the last paragraph of an
+    /// earlier section (every other section) - the real WordprocessingML representation of a
+    /// "next page" section break. A section whose body doesn't end in a paragraph (e.g. ends
+    /// in a table) gets a trailing empty paragraph to carry it, matching what Word itself does.
+    let private sectionsToBodyChildren (ctx: Ctx) (sections: Section list) : OpenXmlElement list =
+        let n = List.length sections
+
+        sections
+        |> List.mapi (fun i sec ->
+            let elements = sec.Body |> List.map (blockToW ctx)
+            let sectPrEl = sectionPropertiesToW ctx sec.Properties
+
+            if i = n - 1 then
+                elements @ [ sectPrEl :> OpenXmlElement ]
+            else
+                match List.rev elements with
+                | (:? Wordprocessing.Paragraph as lastPara) :: restRev ->
+                    let pPr =
+                        match lastPara.ParagraphProperties with
+                        | null ->
+                            let p = Wordprocessing.ParagraphProperties()
+                            lastPara.PrependChild(p) |> ignore
+                            p
+                        | existing -> existing
+
+                    pPr.AppendChild(sectPrEl) |> ignore
+                    List.rev restRev @ [ lastPara :> OpenXmlElement ]
+                | _ ->
+                    let trailerPPr = Wordprocessing.ParagraphProperties()
+                    trailerPPr.AppendChild(sectPrEl) |> ignore
+                    let trailer = Wordprocessing.Paragraph()
+                    trailer.AppendChild(trailerPPr) |> ignore
+                    elements @ [ trailer :> OpenXmlElement ])
+        |> List.concat
+
+    let private docTypeOf (doc: Document) : WordprocessingDocumentType =
+        if doc.VbaProject.IsSome then
+            WordprocessingDocumentType.MacroEnabledDocument
+        else
+            WordprocessingDocumentType.Document
+
+    let private writeDocument (doc: Document) (wordDoc: WordprocessingDocument) : unit =
+        let mainPart = wordDoc.AddMainDocumentPart()
+        let ctx =
+            { MainPart = mainPart
+              Comments = ResizeArray()
+              NextBookmarkId = 1
+              NextCommentId = 0
+              NextDrawingId = 1u
+              NeedsEvenAndOddHeaders = false }
+
+        let stylesPart = mainPart.AddNewPart<StyleDefinitionsPart>()
+        stylesPart.Styles <- stylesToOpenXml doc.Styles
+
+        if not doc.Numbering.IsEmpty then
+            let numberingPart = mainPart.AddNewPart<NumberingDefinitionsPart>()
+            numberingPart.Numbering <- numberingToOpenXml doc.Numbering
+
+        let body = Wordprocessing.Body()
+        sectionsToBodyChildren ctx doc.Sections |> List.iter (body.AppendChild >> ignore)
+
+        let protectionEl = doc.Protection |> Option.bind documentProtectionToW
+
+        if protectionEl.IsSome || ctx.NeedsEvenAndOddHeaders then
+            let settingsPart = mainPart.AddNewPart<DocumentSettingsPart>()
+            let settings = Wordprocessing.Settings()
+            protectionEl |> Option.iter (fun el -> settings.AppendChild(el) |> ignore)
+
+            if ctx.NeedsEvenAndOddHeaders then
+                settings.AppendChild(Wordprocessing.EvenAndOddHeaders()) |> ignore
+
+            settingsPart.Settings <- settings
+
+        // NOT `Wordprocessing.Document(body)` - F# resolves that to the `IEnumerable<
+        // OpenXmlElement>` constructor overload (since `Body` itself implements that
+        // interface over ITS OWN children), which re-parents `body`'s children directly
+        // under `Document` and throws ("part of a tree") since they're already parented
+        // to `body`. Constructing empty then appending sidesteps the ambiguous overload.
+        let documentEl = Wordprocessing.Document()
+        documentEl.AppendChild(body) |> ignore
+        mainPart.Document <- documentEl
+
+        if ctx.Comments.Count > 0 then
+            let commentsPart = mainPart.AddNewPart<WordprocessingCommentsPart>()
+            commentsPart.Comments <- Wordprocessing.Comments(ctx.Comments |> Seq.map (fun c -> c :> OpenXmlElement))
+
+        doc.VbaProject
+        |> Option.iter (fun bytes ->
+            let vbaPart = mainPart.AddNewPart<VbaProjectPart>()
+            use stream = new MemoryStream(bytes)
+            vbaPart.FeedData(stream))
+
+    let saveToStream (doc: Document) (stream: Stream) : unit =
+        use wordDoc = WordprocessingDocument.Create(stream, docTypeOf doc)
+        writeDocument doc wordDoc
+
+    let saveToFile (doc: Document) (path: string) : unit =
+        use wordDoc = WordprocessingDocument.Create(path, docTypeOf doc)
+        writeDocument doc wordDoc

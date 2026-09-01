@@ -1,0 +1,337 @@
+<?xml version="1.0" encoding="utf-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" elementFormDefault="unqualified">
+
+  <xs:element name="document" type="documentType" />
+
+  <xs:complexType name="documentType">
+    <xs:sequence>
+      <xs:element name="sections" type="sectionsType" />
+      <xs:element name="styles" type="stylesType" minOccurs="0" />
+      <xs:element name="numbering" type="numberingType" minOccurs="0" />
+      <xs:element name="protection" type="protectionType" minOccurs="0" />
+      <xs:element name="vbaProject" type="xs:base64Binary" minOccurs="0" />
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="sectionsType">
+    <xs:sequence>
+      <xs:element name="section" type="sectionType" maxOccurs="unbounded" />
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="sectionType">
+    <xs:sequence>
+      <xs:element name="pageSetup" type="pageSetupType" />
+      <xs:element name="body" type="bodyType" />
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="bodyType">
+    <xs:choice minOccurs="0" maxOccurs="unbounded">
+      <xs:element name="para" type="paraType" />
+      <xs:element name="table" type="tableType" />
+    </xs:choice>
+  </xs:complexType>
+
+  <!-- Page setup -->
+
+  <xs:complexType name="pageSetupType">
+    <xs:sequence>
+      <xs:element name="pageSize" type="pageSizeType" />
+      <xs:element name="margins" type="marginsType" />
+      <xs:element name="header" type="headerFooterSetType" minOccurs="0" />
+      <xs:element name="footer" type="headerFooterSetType" minOccurs="0" />
+    </xs:sequence>
+    <xs:attribute name="orientation" type="xs:string" use="required" />
+    <xs:attribute name="pageNumberStart" type="xs:int" />
+    <xs:attribute name="columns" type="xs:int" use="required" />
+  </xs:complexType>
+
+  <xs:complexType name="pageSizeType">
+    <xs:attribute name="kind" type="xs:string" />
+    <xs:attribute name="other" type="xs:int" />
+    <xs:attribute name="widthPoints" type="xs:double" />
+    <xs:attribute name="heightPoints" type="xs:double" />
+  </xs:complexType>
+
+  <xs:complexType name="marginsType">
+    <xs:attribute name="top" type="xs:double" use="required" />
+    <xs:attribute name="bottom" type="xs:double" use="required" />
+    <xs:attribute name="left" type="xs:double" use="required" />
+    <xs:attribute name="right" type="xs:double" use="required" />
+    <xs:attribute name="header" type="xs:double" use="required" />
+    <xs:attribute name="footer" type="xs:double" use="required" />
+    <xs:attribute name="gutter" type="xs:double" use="required" />
+  </xs:complexType>
+
+  <xs:complexType name="headerFooterSetType">
+    <xs:sequence>
+      <xs:element name="default" type="bodyType" minOccurs="0" />
+      <xs:element name="first" type="bodyType" minOccurs="0" />
+      <xs:element name="even" type="bodyType" minOccurs="0" />
+    </xs:sequence>
+  </xs:complexType>
+
+  <!-- Paragraphs / inline content -->
+
+  <xs:complexType name="paraType">
+    <xs:sequence>
+      <xs:element name="paragraphFormat" type="paragraphFormatType" minOccurs="0" />
+      <xs:choice minOccurs="0" maxOccurs="unbounded">
+        <xs:element name="run" type="runType" />
+        <xs:element name="lineBreak" type="emptyType" />
+        <xs:element name="tab" type="emptyType" />
+        <xs:element name="pageBreak" type="emptyType" />
+        <xs:element name="image" type="imageType" />
+        <xs:element name="hyperlink" type="hyperlinkType" />
+        <xs:element name="bookmark" type="bookmarkType" />
+        <xs:element name="comment" type="commentType" />
+        <xs:element name="field" type="fieldType" />
+      </xs:choice>
+    </xs:sequence>
+    <xs:attribute name="styleId" type="xs:string" />
+    <xs:attribute name="numId" type="xs:int" />
+    <xs:attribute name="level" type="xs:int" />
+  </xs:complexType>
+
+  <xs:complexType name="emptyType" />
+
+  <xs:complexType name="inlineContentType">
+    <xs:choice minOccurs="0" maxOccurs="unbounded">
+      <xs:element name="run" type="runType" />
+      <xs:element name="lineBreak" type="emptyType" />
+      <xs:element name="tab" type="emptyType" />
+      <xs:element name="pageBreak" type="emptyType" />
+      <xs:element name="image" type="imageType" />
+      <xs:element name="hyperlink" type="hyperlinkType" />
+      <xs:element name="bookmark" type="bookmarkType" />
+      <xs:element name="comment" type="commentType" />
+      <xs:element name="field" type="fieldType" />
+    </xs:choice>
+  </xs:complexType>
+
+  <xs:complexType name="runType" mixed="true">
+    <xs:sequence>
+      <xs:element name="runStyle" type="runStyleType" minOccurs="0" />
+    </xs:sequence>
+    <xs:attribute name="styleId" type="xs:string" />
+  </xs:complexType>
+
+  <xs:complexType name="imageType">
+    <xs:simpleContent>
+      <xs:extension base="xs:base64Binary">
+        <xs:attribute name="format" type="xs:string" use="required" />
+        <xs:attribute name="widthEmu" type="xs:long" use="required" />
+        <xs:attribute name="heightEmu" type="xs:long" use="required" />
+        <xs:attribute name="altText" type="xs:string" />
+      </xs:extension>
+    </xs:simpleContent>
+  </xs:complexType>
+
+  <xs:complexType name="hyperlinkType">
+    <xs:sequence>
+      <xs:choice>
+        <xs:element name="externalHyperlink" type="xs:string" />
+        <xs:element name="internalHyperlink" type="xs:string" />
+      </xs:choice>
+      <xs:element name="content" type="inlineContentType" />
+    </xs:sequence>
+    <xs:attribute name="tooltip" type="xs:string" />
+  </xs:complexType>
+
+  <xs:complexType name="bookmarkType">
+    <xs:complexContent>
+      <xs:extension base="inlineContentType">
+        <xs:attribute name="name" type="xs:string" use="required" />
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+
+  <xs:complexType name="commentType">
+    <xs:sequence>
+      <xs:element name="text" type="xs:string" />
+      <xs:element name="content" type="inlineContentType" />
+    </xs:sequence>
+    <xs:attribute name="author" type="xs:string" use="required" />
+    <xs:attribute name="initials" type="xs:string" />
+    <xs:attribute name="date" type="xs:string" />
+  </xs:complexType>
+
+  <xs:complexType name="fieldType">
+    <xs:attribute name="instruction" type="xs:string" use="required" />
+    <xs:attribute name="cachedResult" type="xs:string" />
+  </xs:complexType>
+
+  <!-- Formatting -->
+
+  <xs:complexType name="runStyleType">
+    <xs:attribute name="fontFamily" type="xs:string" />
+    <xs:attribute name="size" type="xs:double" />
+    <xs:attribute name="bold" type="xs:boolean" />
+    <xs:attribute name="italic" type="xs:boolean" />
+    <xs:attribute name="underline" type="xs:string" />
+    <xs:attribute name="strikethrough" type="xs:boolean" />
+    <xs:attribute name="color" type="xs:string" />
+    <xs:attribute name="highlight" type="xs:string" />
+    <xs:attribute name="verticalPosition" type="xs:string" />
+  </xs:complexType>
+
+  <xs:complexType name="paragraphFormatType">
+    <xs:sequence>
+      <xs:element name="lineSpacing" type="lineSpacingType" minOccurs="0" />
+      <xs:element name="indentation" type="indentationType" minOccurs="0" />
+    </xs:sequence>
+    <xs:attribute name="alignment" type="xs:string" />
+    <xs:attribute name="spacingBefore" type="xs:double" />
+    <xs:attribute name="spacingAfter" type="xs:double" />
+    <xs:attribute name="keepWithNext" type="xs:boolean" />
+    <xs:attribute name="pageBreakBefore" type="xs:boolean" />
+  </xs:complexType>
+
+  <xs:complexType name="lineSpacingType">
+    <xs:attribute name="kind" type="xs:string" use="required" />
+    <xs:attribute name="points" type="xs:double" />
+    <xs:attribute name="factor" type="xs:double" />
+  </xs:complexType>
+
+  <xs:complexType name="indentationType">
+    <xs:attribute name="left" type="xs:double" />
+    <xs:attribute name="right" type="xs:double" />
+    <xs:attribute name="firstLine" type="xs:double" />
+    <xs:attribute name="hanging" type="xs:double" />
+  </xs:complexType>
+
+  <xs:complexType name="borderSideType">
+    <xs:attribute name="style" type="xs:string" use="required" />
+    <xs:attribute name="width" type="xs:double" />
+    <xs:attribute name="color" type="xs:string" />
+  </xs:complexType>
+
+  <xs:complexType name="tableBordersType">
+    <xs:sequence>
+      <xs:element name="left" type="borderSideType" minOccurs="0" />
+      <xs:element name="right" type="borderSideType" minOccurs="0" />
+      <xs:element name="top" type="borderSideType" minOccurs="0" />
+      <xs:element name="bottom" type="borderSideType" minOccurs="0" />
+      <xs:element name="insideHorizontal" type="borderSideType" minOccurs="0" />
+      <xs:element name="insideVertical" type="borderSideType" minOccurs="0" />
+    </xs:sequence>
+  </xs:complexType>
+
+  <!-- Tables -->
+
+  <xs:complexType name="tableType">
+    <xs:sequence>
+      <xs:element name="tableStyle" type="tableStyleType" minOccurs="0" />
+      <xs:element name="tableBorders" type="tableBordersType" minOccurs="0" />
+      <xs:element name="columnWidths" type="columnWidthsType" />
+      <xs:element name="rows" type="rowsType" />
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="tableStyleType">
+    <xs:attribute name="name" type="xs:string" use="required" />
+    <xs:attribute name="firstRow" type="xs:boolean" />
+    <xs:attribute name="lastRow" type="xs:boolean" />
+    <xs:attribute name="bandedRows" type="xs:boolean" />
+    <xs:attribute name="bandedColumns" type="xs:boolean" />
+  </xs:complexType>
+
+  <xs:complexType name="columnWidthsType">
+    <xs:sequence>
+      <xs:element name="col" maxOccurs="unbounded">
+        <xs:complexType>
+          <xs:attribute name="width" type="xs:double" use="required" />
+        </xs:complexType>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="rowsType">
+    <xs:sequence>
+      <xs:element name="row" type="rowType" maxOccurs="unbounded" />
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="rowType">
+    <xs:sequence>
+      <xs:element name="cell" type="cellType" maxOccurs="unbounded" />
+    </xs:sequence>
+    <xs:attribute name="height" type="xs:double" />
+  </xs:complexType>
+
+  <xs:complexType name="cellType">
+    <xs:sequence>
+      <xs:element name="cellProps" type="cellPropsType" minOccurs="0" />
+      <xs:choice minOccurs="0" maxOccurs="unbounded">
+        <xs:element name="para" type="paraType" />
+        <xs:element name="table" type="tableType" />
+      </xs:choice>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="cellPropsType">
+    <xs:sequence>
+      <xs:element name="tableBorders" type="tableBordersType" minOccurs="0" />
+    </xs:sequence>
+    <xs:attribute name="gridSpan" type="xs:int" />
+    <xs:attribute name="verticalMerge" type="xs:string" />
+    <xs:attribute name="shading" type="xs:string" />
+    <xs:attribute name="width" type="xs:double" />
+  </xs:complexType>
+
+  <!-- Styles / numbering / protection -->
+
+  <xs:complexType name="stylesType">
+    <xs:sequence>
+      <xs:element name="style" type="styleType" maxOccurs="unbounded" />
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="styleType">
+    <xs:sequence>
+      <xs:element name="runStyle" type="runStyleType" minOccurs="0" />
+      <xs:element name="paragraphFormat" type="paragraphFormatType" minOccurs="0" />
+    </xs:sequence>
+    <xs:attribute name="id" type="xs:string" use="required" />
+    <xs:attribute name="name" type="xs:string" use="required" />
+    <xs:attribute name="type" type="xs:string" use="required" />
+    <xs:attribute name="basedOn" type="xs:string" />
+  </xs:complexType>
+
+  <xs:complexType name="numberingType">
+    <xs:sequence>
+      <xs:element name="numberingDef" type="numberingDefType" maxOccurs="unbounded" />
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="numberingDefType">
+    <xs:sequence>
+      <xs:element name="level" type="levelType" maxOccurs="unbounded" />
+    </xs:sequence>
+    <xs:attribute name="id" type="xs:int" use="required" />
+  </xs:complexType>
+
+  <xs:complexType name="levelType">
+    <xs:sequence>
+      <xs:element name="format" type="numberFormatType" />
+    </xs:sequence>
+    <xs:attribute name="text" type="xs:string" use="required" />
+    <xs:attribute name="indentLeft" type="xs:double" />
+    <xs:attribute name="hangingIndent" type="xs:double" />
+    <xs:attribute name="startAt" type="xs:int" />
+  </xs:complexType>
+
+  <xs:complexType name="numberFormatType">
+    <xs:attribute name="kind" type="xs:string" use="required" />
+    <xs:attribute name="glyph" type="xs:int" />
+    <xs:attribute name="font" type="xs:string" />
+    <xs:attribute name="raw" type="xs:string" />
+  </xs:complexType>
+
+  <xs:complexType name="protectionType">
+    <xs:attribute name="edit" type="xs:string" />
+    <xs:attribute name="password" type="xs:string" />
+  </xs:complexType>
+
+</xs:schema>

@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Kookerella.FsWordDsl/Kookerella.FsWordDsl.fsproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Kookerella.FsWordDsl.Tests/Kookerella.FsWordDsl.Tests.fsproj" />
+  </Folder>
+  <Folder Name="/samples/">
+    <Project Path="samples/Kookerella.FsWordDsl.Sample/Kookerella.FsWordDsl.Sample.fsproj" />
+  </Folder>
+</Solution>

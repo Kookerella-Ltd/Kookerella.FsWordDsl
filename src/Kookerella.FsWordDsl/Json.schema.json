@@ -1,0 +1,169 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Kookerella.FsWordDsl document",
+  "type": "object",
+  "required": ["sections"],
+  "properties": {
+    "sections": { "type": "array", "items": { "$ref": "#/$defs/section" } },
+    "styles": { "type": "array", "items": { "$ref": "#/$defs/style" } },
+    "numbering": { "type": "array", "items": { "$ref": "#/$defs/numberingDef" } },
+    "protection": { "$ref": "#/$defs/protection" },
+    "vbaProject": { "type": "string" }
+  },
+  "$defs": {
+    "section": {
+      "type": "object",
+      "required": ["pageSetup", "body"],
+      "properties": {
+        "pageSetup": { "$ref": "#/$defs/pageSetup" },
+        "body": { "type": "array", "items": { "$ref": "#/$defs/block" } }
+      }
+    },
+    "pageSetup": {
+      "type": "object",
+      "required": ["pageSize", "orientation", "margins", "columns"],
+      "properties": {
+        "pageSize": { "$ref": "#/$defs/pageSize" },
+        "orientation": { "type": "string", "enum": ["Portrait", "Landscape"] },
+        "margins": { "$ref": "#/$defs/margins" },
+        "header": { "$ref": "#/$defs/headerFooterSet" },
+        "footer": { "$ref": "#/$defs/headerFooterSet" },
+        "pageNumberStart": { "type": "integer" },
+        "columns": { "type": "integer" }
+      }
+    },
+    "pageSize": {
+      "oneOf": [
+        { "type": "string", "enum": ["Letter", "Legal", "A4", "A3"] },
+        { "type": "object", "properties": { "other": { "type": "integer" } }, "required": ["other"] },
+        { "type": "object", "properties": { "widthPoints": { "type": "number" }, "heightPoints": { "type": "number" } }, "required": ["widthPoints", "heightPoints"] }
+      ]
+    },
+    "margins": {
+      "type": "object",
+      "required": ["top", "bottom", "left", "right", "header", "footer", "gutter"],
+      "properties": {
+        "top": { "type": "number" },
+        "bottom": { "type": "number" },
+        "left": { "type": "number" },
+        "right": { "type": "number" },
+        "header": { "type": "number" },
+        "footer": { "type": "number" },
+        "gutter": { "type": "number" }
+      }
+    },
+    "headerFooterSet": {
+      "type": "object",
+      "properties": {
+        "default": { "type": "array", "items": { "$ref": "#/$defs/block" } },
+        "first": { "type": "array", "items": { "$ref": "#/$defs/block" } },
+        "even": { "type": "array", "items": { "$ref": "#/$defs/block" } }
+      }
+    },
+    "block": {
+      "type": "object",
+      "properties": {
+        "para": { "$ref": "#/$defs/para" },
+        "table": { "$ref": "#/$defs/table" }
+      },
+      "minProperties": 1,
+      "maxProperties": 1
+    },
+    "para": {
+      "type": "object",
+      "required": ["inlines"],
+      "properties": {
+        "styleId": { "type": "string" },
+        "format": { "$ref": "#/$defs/paragraphFormat" },
+        "numId": { "type": "integer" },
+        "level": { "type": "integer" },
+        "inlines": { "type": "array", "items": { "$ref": "#/$defs/inline" } }
+      }
+    },
+    "inline": {
+      "oneOf": [
+        { "type": "string", "enum": ["lineBreak", "tab", "pageBreak"] },
+        { "type": "object" }
+      ]
+    },
+    "runStyle": {
+      "type": "object",
+      "properties": {
+        "fontFamily": { "type": "string" },
+        "size": { "type": "number" },
+        "bold": { "type": "boolean" },
+        "italic": { "type": "boolean" },
+        "underline": { "type": "string" },
+        "strikethrough": { "type": "boolean" },
+        "color": { "type": "string" },
+        "highlight": { "type": "string" },
+        "verticalPosition": { "type": "string" }
+      }
+    },
+    "paragraphFormat": {
+      "type": "object",
+      "properties": {
+        "alignment": { "type": "string" },
+        "spacingBefore": { "type": "number" },
+        "spacingAfter": { "type": "number" },
+        "lineSpacing": {},
+        "indentation": { "type": "object" },
+        "keepWithNext": { "type": "boolean" },
+        "pageBreakBefore": { "type": "boolean" }
+      }
+    },
+    "table": {
+      "type": "object",
+      "required": ["columnWidths", "rows"],
+      "properties": {
+        "style": { "type": "object" },
+        "borders": { "type": "object" },
+        "columnWidths": { "type": "array", "items": { "type": "number" } },
+        "rows": { "type": "array", "items": { "$ref": "#/$defs/row" } }
+      }
+    },
+    "row": {
+      "type": "object",
+      "required": ["cells"],
+      "properties": {
+        "height": { "type": "number" },
+        "cells": { "type": "array", "items": { "$ref": "#/$defs/cell" } }
+      }
+    },
+    "cell": {
+      "type": "object",
+      "required": ["content"],
+      "properties": {
+        "props": { "type": "object" },
+        "content": { "type": "array", "items": { "$ref": "#/$defs/block" } }
+      }
+    },
+    "style": {
+      "type": "object",
+      "required": ["id", "name", "type"],
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "type": { "type": "string", "enum": ["paragraph", "character"] },
+        "basedOn": { "type": "string" },
+        "runStyle": { "$ref": "#/$defs/runStyle" },
+        "paragraphFormat": { "$ref": "#/$defs/paragraphFormat" }
+      }
+    },
+    "numberingDef": {
+      "type": "object",
+      "required": ["id", "levels"],
+      "properties": {
+        "id": { "type": "integer" },
+        "levels": { "type": "array", "items": { "type": "object" } }
+      }
+    },
+    "protection": {
+      "type": "object",
+      "properties": {
+        "edit": { "type": "string" },
+        "password": { "type": "string" }
+      }
+    }
+  }
+}

@@ -1,0 +1,319 @@
+# Kookerella.FsWordDsl
+
+A typesafe F# DSL for building Word documents, interpreted into calls against the
+[DocumentFormat.OpenXml](https://github.com/dotnet/Open-XML-SDK) SDK. The DSL is a plain
+data model (records/DUs with structural equality) - the interpreter (`Writer`) compiles it
+to OOXML, and the reverse transform (`Reader`) parses an existing `.docx` back into the
+same DSL.
+
+This is the WordprocessingML sibling of
+[Kookerella.FsOpenXmlDsl](https://github.com/Kookerella-Ltd/Kookerella.FsOpenXmlDsl) (the
+Excel/SpreadsheetML one) - same objectives, same round-trip philosophy, translated to
+Word's own document model. See [MAPPING.md](MAPPING.md) for exactly which WordprocessingML
+features map 1:1, which are approximated, and which aren't modeled yet.
+
+**This round-trips in both directions**, which most Word libraries don't: they give you an
+imperative API to build a document from scratch, but no way to turn an *existing* file back
+into readable source. Here, `Reader` parses a real `.docx`/`.docm` back into the same DSL,
+and `Document.generateScript` goes one step further and renders that model back out as a
+self-contained script that rebuilds an equivalent file - a decompiler for Word documents,
+not just a writer. Two more surfaces, `Xml.toDocument`/`Xml.ofDocument` (see ["## XML"](#xml)
+below) and `Json.toDocument`/`Json.ofDocument` (see ["## JSON"](#json) below), do the same
+translation to/from plain XML or JSON against a real schema - for a caller who'd rather
+generate or consume data than write code at all.
+
+**Scope note**: this repo currently ships the F# core only - no C# wrapper and no MCP
+server yet (unlike the Excel repo, which has both). See [CLAUDE.md](CLAUDE.md) for the
+reasoning and what adding either would look like.
+
+## Layout
+
+- `src/Kookerella.FsWordDsl` - the library.
+  - `Units.fs` - conversions between points/inches/pixels and the physical units
+    WordprocessingML uses on the wire (twips for page geometry/spacing, EMU for image
+    sizing).
+  - `Styles.fs` - character and paragraph formatting: `Color`, `HighlightColor` (Word's own
+    fixed highlight palette), `UnderlineStyle`, `RunStyle`, `ParagraphAlignment`,
+    `Indentation`, `LineSpacingRule`, `ParagraphFormat`, `BorderLineStyle`, `BorderSide`,
+    `BorderStyle` (reused for both paragraph and table borders).
+  - `NamedStyles.fs` - `StyleDefinition` (paragraph or character, with `BasedOn`
+    inheritance) and a small `BuiltInStyles` catalog (`normal`, `heading1`/`2`/`3`,
+    `title`, `listParagraph`, `hyperlinkCharStyle`).
+  - `Numbering.fs` - `NumberFormatKind`, `ListLevel`, `NumberingDefinition` for
+    numbered/bulleted lists.
+  - `Hyperlinks.fs` - `HyperlinkTarget` (external URL vs. internal bookmark reference).
+  - `Protection.fs` - `EditRestriction` and `DocumentProtection`, document-level (Word has
+    no per-section equivalent of Excel's per-sheet protection).
+  - `PageSetup.fs` - `PageOrientation`, `PageSize`, `PageMargins`.
+  - `Tables.fs` - `TableBorders`, `VerticalMergeKind`, `TableCellProps`, `TableStyleRef`.
+  - `Images.fs` - `ImageFormat`, `ImageEntry` (raw file bytes plus an on-page size),
+    anchored inline within a run.
+  - `Model.fs` - the recursive content model: `Inline` (runs, breaks, images, hyperlinks,
+    bookmarks, comments, simple fields), `Paragraph`, `Block` (paragraph or table),
+    `TableCell`/`TableRow`/`TableEntry`, `HeaderFooterSet`, `SectionProperties`, `Section`,
+    `Document` (including `Document.VbaProject`, a macro-enabled document's raw
+    `vbaProject.bin` bytes).
+  - `Xml.fs` / `Xml.xsd` - the XML surface: `Xml.toDocument`/`Xml.ofDocument` translate a
+    `Document` to/from an `XElement` tree, and `Xml.schemaSet()` loads the paired schema
+    (embedded in the assembly as a resource) for validating either direction. See
+    ["## XML"](#xml) below.
+  - `Json.fs` / `Json.schema.json` - the JSON surface: `Json.toDocument`/`Json.ofDocument`
+    translate a `Document` to/from a `System.Text.Json.Nodes.JsonObject` tree. Schema
+    validation is test-suite only, not a public API. See ["## JSON"](#json) below.
+  - `Builders.fs` - plain functional constructors (`section`, `document`, `withStyles`,
+    `withNumbering`, `withProtection`, `withVbaProject`, `bulletListDef`,
+    `numberedListDef`) plus `DocumentDsl` - smart constructors (`run`, `para`, `hyperlink`,
+    `bookmark`, `comment`, `image`, `tableCell`, `tableRow`, `table`) with real optional
+    parameters, the Word analog of the Excel repo's `SheetDsl`.
+  - `Interpreter/StyleRegistry.fs` - shared run/paragraph/border/color conversions plus
+    `Document.Styles` <-> `styles.xml` (internal).
+  - `Interpreter/ImageWriter.fs` / `ImageReader.fs` - an inline image's own DSL <->
+    DrawingML translation (internal).
+  - `Interpreter/Writer.fs` - DSL -> OOXML (internal).
+  - `Interpreter/Reader.fs` - OOXML -> DSL, the reverse transform (internal).
+  - `Interpreter/CodeGen.fs` - DSL -> F# *source text*: renders a `Document` back out as a
+    self-contained `.fsx` script that rebuilds an equivalent file when run (internal).
+  - `Api.fs` - the public `Document.save`/`saveToStream`/`load`/`loadFromStream`/
+    `generateScript` entry points.
+- `tests/Kookerella.FsWordDsl.Tests` - one test per feature, each validating the produced
+  file against the OOXML schema (`DocumentFormat.OpenXml.Validation.OpenXmlValidator`) and
+  asserting an exact round trip back through the DSL. Each test also writes the document it
+  builds to `Examples/<test name>/output.docx` (checked into the repo), plus `script.fsx`
+  (regenerates the file - a separate, slower `Category=Slow` test group actually executes
+  each one via `dotnet fsi`), `document.xml`, and `document.json` - one folder always has
+  four views of the same example.
+- `samples/Kookerella.FsWordDsl.Sample` - a small console app that builds a document, saves
+  it, and reads it back.
+
+## Quick start
+
+```fsharp
+open Kookerella.FsWordDsl
+open type Kookerella.FsWordDsl.DocumentDsl
+
+let doc =
+    document
+        [ section
+              [ para ([ run "Quarterly Report" ], styleId = "Title")
+                para
+                    [ run "This report covers "
+                      run ("Q1 2026", style = { RunStyle.Default with Bold = true })
+                      run ", see the "
+                      hyperlink ("full dataset", ExternalUrl "https://example.com/data")
+                      run " for details." ] ] ]
+
+doc |> Document.save "report.docx"
+
+// Reverse transform:
+let roundTripped = Document.load "report.docx"
+```
+
+`document` defaults `Styles` to `BuiltInStyles.all`, so `styleId = "Heading1"` (or any other
+built-in id) just works without registering it first - pipe `withStyles` afterward to
+replace or extend that set. `run`/`para`/`hyperlink`/`bookmark`/`comment`/`image`/
+`tableCell`/`tableRow`/`table` are `DocumentDsl` members with real optional parameters
+(`open type Kookerella.FsWordDsl.DocumentDsl` brings them into scope unqualified, same as
+`open type SheetDsl` does in the Excel repo) - plain F# `let` bindings can't have optional
+parameters, which is why this part of the DSL is a type.
+
+A `Paragraph`'s `Inlines` are naturally several independently-styled runs - rich text
+(mixed formatting within one paragraph) is first-class, not a documented gap the way
+Excel's single-uniform-run `Text` cell is:
+
+```fsharp
+para
+    [ run "Plain text, "
+      run ("bold", style = { RunStyle.Default with Bold = true })
+      run ", and "
+      run ("colored", style = { RunStyle.Default with Color = Some Color.red }) ]
+```
+
+Lists use a `(numId, level)` reference on the paragraph, resolved against a
+`NumberingDefinition` attached to the document:
+
+```fsharp
+document
+    [ section
+          [ para ([ run "First bullet" ], numbering = (1, 0))
+            para ([ run "Second bullet" ], numbering = (1, 0)) ] ]
+|> withNumbering [ bulletListDef 1 ]
+```
+
+Tables are built from `tableRow`/`tableCell`, with column widths given once for the whole
+table - a cell without an explicit width falls back to its column's width at write time:
+
+```fsharp
+table (
+    [ tableRow [ tableCell [ para [ run "Item" ] ]; tableCell [ para [ run "Qty" ] ] ]
+      tableRow [ tableCell [ para [ run "Widgets" ] ]; tableCell [ para [ run "12" ] ] ] ],
+    [ 200.0; 100.0 ],
+    style = TableStyleRef.Default
+)
+```
+
+Cell merging - horizontal (`GridSpan`) and vertical (`RestartMerge`/`ContinueMerge`) - are
+independent and combine on the same cell, matching real Word:
+
+```fsharp
+tableCell ([ para [ run "Spans 2 columns" ] ], props = { TableCellProps.Default with GridSpan = Some 2 })
+```
+
+Sections carry their own page setup - a document is a sequence of `Section`s, mapping 1:1
+onto real Word section breaks:
+
+```fsharp
+let landscape = { SectionProperties.Default with Orientation = Landscape }
+document [ sectionWith landscape [ para [ run "A landscape-oriented page." ] ] ]
+```
+
+Headers and footers are per-section, with `Default`/`First`/`Even` variants (the
+`titlePg`/`evenAndOddHeaders` flags real Word needs are set automatically):
+
+```fsharp
+let footer = { HeaderFooterSet.None with Default = Some [ para [ run "Page "; Field("PAGE", Some "1") ] ] }
+sectionWith { SectionProperties.Default with Footer = Some footer } [ para [ run "Body text." ] ]
+```
+
+Comments and bookmarks wrap inline content directly (scoped to within one paragraph - see
+[MAPPING.md](MAPPING.md)):
+
+```fsharp
+para [ comment ([ run "This figure needs review." ], "Please double check the totals.", author = "Alex") ]
+```
+
+Document-level protection and macros are pipe-friendly, same shape as Excel's own
+`withProtection`/`withVbaProject`:
+
+```fsharp
+document [...] |> withProtection { Edit = Some ReadOnlyRestriction; Password = Some "hunter2" }
+document [...] |> withVbaProject (System.IO.File.ReadAllBytes("vbaProject.bin"))
+```
+
+Save the result with a `.docm` path - `Document.save`/`saveToStream` automatically switch
+the file's own declared content type to Word's macro-enabled kind whenever a `VbaProject`
+is present, but real Word also expects the `.docm` extension to trust and run macros at all.
+
+## Regenerating a file as F# source
+
+Given a `Document` (typically one you just `Document.load`ed from an existing file),
+`Document.generateScript` renders it back out as a self-contained `.fsx` script that
+rebuilds an equivalent file when run - a code-generating counterpart to `Document.load`:
+
+```fsharp
+let doc = Document.load "input.docx"
+
+let referenceLines =
+    [ "#r \"path/to/Kookerella.FsWordDsl.dll\""
+      "#r \"path/to/DocumentFormat.OpenXml.dll\"" ]
+
+let script = Document.generateScript referenceLines "output.docx" doc
+System.IO.File.WriteAllText("regenerate.fsx", script)
+```
+
+Running `dotnet fsi regenerate.fsx` produces `output.docx` - not byte-identical to the
+original (zip metadata/timestamps differ) but structurally equivalent through the same
+round-trip lens every other test in this repo uses. Every scenario under `tests/
+Kookerella.FsWordDsl.Tests/Examples/` has a committed `script.fsx` generated exactly this
+way; the `Category=Slow` test group actually executes each one via `dotnet fsi` and checks
+it reproduces the committed `.docx`.
+
+## XML
+
+`Xml.toDocument`/`Xml.ofDocument` (in `Xml.fs`) are a third way in and out of the DSL,
+alongside writing F# directly and code generation: plain XML, against a real schema
+(`Xml.xsd`, embedded in the assembly). A data-carrying DU case becomes an element named
+after the case; a parameterless-choice case becomes an attribute value or bare string,
+matching the convention the Excel repo's own `Xml.fs` documents.
+
+```fsharp
+open System.Xml.Linq
+
+// XML -> Document -> .docx
+let doc = XElement.Load "report.xml" |> Xml.ofDocument
+Document.save "report.docx" doc
+
+// .docx -> Document -> XML
+let xml = Document.load "report.docx" |> Xml.toDocument
+xml.Save "report.xml"
+```
+
+A run with direct formatting and a hyperlink, in XML:
+
+```xml
+<para>
+  <run>Visit </run>
+  <hyperlink tooltip="Kookerella on GitHub">
+    <externalHyperlink>https://github.com/Kookerella-Ltd</externalHyperlink>
+    <content>
+      <run styleId="Hyperlink">Kookerella on GitHub</run>
+    </content>
+  </hyperlink>
+  <run> for more.</run>
+</para>
+```
+
+`Xml.schemaSet()` loads the compiled schema for validating either direction yourself
+(`XDocument.Validate`) - every scenario under `tests/Kookerella.FsWordDsl.Tests/Examples/`
+has a committed `document.xml` validated against it this way as part of the same test that
+generates it.
+
+## JSON
+
+`Json.toDocument`/`Json.ofDocument` (in `Json.fs`) are a fourth way in and out of the DSL,
+alongside writing F# directly, code generation, and XML: plain JSON, for a caller whose
+tooling speaks JSON rather than XML. The same DU-case conventions apply, in JSON's own
+idiom (a single-key object for a data-carrying case, a bare string for a parameterless one):
+
+```fsharp
+open System.Text.Json.Nodes
+
+// JSON -> Document -> .docx
+let doc = JsonNode.Parse(File.ReadAllText "report.json").AsObject() |> Json.ofDocument
+Document.save "report.docx" doc
+
+// .docx -> Document -> JSON
+let json = Document.load "report.docx" |> Json.toDocument
+File.WriteAllText("report.json", json.ToJsonString())
+```
+
+The same hyperlink example as above, in JSON:
+
+```json
+{
+  "para": {
+    "inlines": [
+      { "run": { "text": "Visit " } },
+      {
+        "hyperlink": {
+          "target": { "externalHyperlink": "https://github.com/Kookerella-Ltd" },
+          "runs": [ { "run": { "text": "Kookerella on GitHub", "styleId": "Hyperlink" } } ],
+          "tooltip": "Kookerella on GitHub"
+        }
+      },
+      { "run": { "text": " for more." } }
+    ]
+  }
+}
+```
+
+Unlike XML, .NET has no built-in JSON Schema validator, so `Json.schema.json` (in the repo)
+is validated only from this repo's own test suite (via a test-only `JsonSchema.Net`
+dependency) rather than exposed as a public API - see `Json.fs`'s own doc comment.
+
+## Building and testing
+
+```bash
+dotnet build
+dotnet test --filter "Category!=Slow"
+dotnet run --project samples/Kookerella.FsWordDsl.Sample
+```
+
+The default loop above skips the slow `Category=Slow` tests, which actually invoke
+`dotnet fsi` on every generated `Examples/*/script.fsx` (multi-second process startup each).
+Run those explicitly, after the fast suite has populated the `.fsx` files at least once:
+
+```bash
+dotnet test --filter "Category=Slow"
+```
+
+Plain `dotnet test` (no filter) runs both groups.

@@ -1,0 +1,38 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="XmlTests.fs" />
+    <Compile Include="JsonTests.fs" />
+    <Compile Include="Tests.fs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Not compiled - these are the per-scenario example documents (and their
+         regenerating scripts and equivalent XML/JSON - see verifyScenarioNamed in
+         Tests.fs) each test in Tests.fs generates. Listed explicitly so Solution
+         Explorer shows them; F#'s SDK doesn't auto-include files the way C#'s does. -->
+    <None Include="Examples\**\*.docx" />
+    <None Include="Examples\**\*.docm" />
+    <None Include="Examples\**\*.fsx" />
+    <None Include="Examples\**\*.xml" />
+    <None Include="Examples\**\*.json" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" Version="6.0.4" />
+    <PackageReference Include="JsonSchema.Net" Version="9.4.0" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Kookerella.FsWordDsl\Kookerella.FsWordDsl.fsproj" />
+  </ItemGroup>
+
+</Project>
