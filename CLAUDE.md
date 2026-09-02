@@ -4,17 +4,32 @@ Instructions for any Claude Code session working in this repo.
 
 ## Repo layout
 
-This repo currently ships **the F# core only** - no C# wrapper and no MCP server yet
-(compare `Kookerella.FsOpenXmlDsl`, the Excel analog this repo was built to mirror, which
-has all three). Don't assume either exists; if you're asked to add one, that's a new
-package under `src/`, following the same pattern `Kookerella.CsOpenXmlDsl`/
-`Kookerella.FsOpenXmlDsl.Mcp` do in that repo - not an extension of what's here.
+This repo ships **the F# core plus a fluent C# wrapper** - no MCP server yet (compare
+`Kookerella.FsOpenXmlDsl`, the Excel analog this repo was built to mirror, which has all
+three). Don't assume the MCP server exists; if you're asked to add one, that's a new
+package under `src/`, following the pattern `Kookerella.FsOpenXmlDsl.Mcp` does in that repo
+- not an extension of what's here.
 
 - `src/Kookerella.FsWordDsl` - the F# core: a typesafe DSL over the WordprocessingML
   schema, interpreted by `Interpreter/Writer.fs` and reversed by `Interpreter/Reader.fs`.
+- `src/Kookerella.CsWordDsl` - an idiomatic, immutable, fluent C# wrapper over the F# core
+  (`DocumentConverter.cs` does the two-way translation; `DocumentIO.cs` is the one place it
+  touches I/O; `CsCodeGen.cs` is its own C#-source-text decompiler, the C# analog of
+  `Interpreter/CodeGen.fs`) - see that project's own `DocumentConverter.cs` doc comment for
+  the F#-compiled-shape gotchas this needed (DU cases as `New<Case>` static factories/
+  singleton properties, case field names keeping their F#-source lowercase casing unlike a
+  plain record's PascalCase properties, tuples as `System.Tuple`, not `ValueTuple`).
 - `tests/Kookerella.FsWordDsl.Tests` - one scenario per feature under `Examples/`, each
   validated against the real OOXML schema and round-tripped exactly back through the DSL.
-- `samples/Kookerella.FsWordDsl.Sample` - a small console app exercising the DSL end to
+- `tests/Kookerella.CsWordDsl.Tests` - `DriftGuardTests.cs` (a reflection-based tripwire
+  comparing F# DU case counts against their C# mirrors - see its own doc comment),
+  `DocumentTests.cs` (targeted round-trip assertions per feature - not whole-`Document`
+  equality, since `IReadOnlyList<T>` properties don't get deep structural equality for
+  free), `ExampleTests.cs` (reloads the F# suite's own `Examples/*/output.docx` fixtures
+  rather than re-authoring every scenario), `CsCodeGenTests.cs` (actually executes a
+  generated file via `dotnet run --file`, the C# analog of the F# suite's `Category=Slow`
+  `dotnet fsi` group).
+- `samples/Kookerella.FsWordDsl.Sample` - a small console app exercising the F# DSL end to
   end (build, save, reload).
 
 ## A real, hard-won gotcha specific to this SDK/F# combination
@@ -77,6 +92,13 @@ qualification scheme avoids.
    only partially modeled).
 10. **README.md**: the layout list and, if it's a significant feature, a worked example
     matching the style of the existing ones.
+11. **`src/Kookerella.CsWordDsl`**: add/extend the matching C# type(s) (same file-per-type
+    convention the existing files use), then wire both directions into
+    `DocumentConverter.cs` and the rendering into `CsCodeGen.cs`. `tests/
+    Kookerella.CsWordDsl.Tests/DriftGuardTests.cs` will fail loudly if a new F# DU case
+    doesn't get a matching C# case - that's the tripwire catching exactly this omission,
+    not a test to silence by adding to its `KnownGaps` unless the omission is genuinely
+    deliberate and documented.
 
 ## Process discipline
 
@@ -101,3 +123,6 @@ qualification scheme avoids.
 - Plain `dotnet test` (no filter) runs both groups.
 - `dotnet run --project samples/Kookerella.FsWordDsl.Sample` - builds a small report,
   saves it, and reads it back, printing a summary.
+- `dotnet test tests/Kookerella.CsWordDsl.Tests` - the C# wrapper's own suite (no
+  fast/slow split; `CsCodeGenTests.cs` shells out to `dotnet run --file` itself, so a
+  single `dotnet test` run already covers the C# analog of the F# suite's slow group).

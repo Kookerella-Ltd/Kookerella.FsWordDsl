@@ -22,9 +22,14 @@ below) and `Json.toDocument`/`Json.ofDocument` (see ["## JSON"](#json) below), d
 translation to/from plain XML or JSON against a real schema - for a caller who'd rather
 generate or consume data than write code at all.
 
-**Scope note**: this repo currently ships the F# core only - no C# wrapper and no MCP
-server yet (unlike the Excel repo, which has both). See [CLAUDE.md](CLAUDE.md) for the
-reasoning and what adding either would look like.
+**A fluent C# wrapper** (`Kookerella.CsWordDsl`) sits on top of the F# core for callers who'd
+rather not touch F# discriminated unions/option types directly - immutable records with
+`With*` builders, plus its own `CsCodeGen` decompiler that renders a `Document` back out as
+runnable C# source. See ["## The C# wrapper"](#the-c-wrapper) below.
+
+**Scope note**: this repo doesn't ship an MCP server yet (unlike the Excel repo, which has
+one alongside its F# core and C# wrapper). See [CLAUDE.md](CLAUDE.md) for what adding one
+would look like.
 
 ## Layout
 
@@ -105,6 +110,11 @@ reasoning and what adding either would look like.
     self-contained `.fsx` script that rebuilds an equivalent file when run (internal).
   - `Api.fs` - the public `Document.save`/`saveToStream`/`load`/`loadFromStream`/
     `generateScript` entry points.
+- `src/Kookerella.CsWordDsl` - the fluent C# wrapper (see ["## The C# wrapper"](#the-c-wrapper)
+  below): immutable records/`sealed record` closed hierarchies mirroring the F# core's own
+  types one-for-one, `DocumentConverter.cs` (internal, the two-way F#<->C# translation),
+  `DocumentIO.cs` (`Save`/`Load`, the one place this project does I/O), `CsCodeGen.cs` (DSL
+  -> C# *source text*, the C# analog of `Interpreter/CodeGen.fs`).
 - `tests/Kookerella.FsWordDsl.Tests` - one test per feature, each validating the produced
   file against the OOXML schema (`DocumentFormat.OpenXml.Validation.OpenXmlValidator`) and
   asserting an exact round trip back through the DSL. Each test also writes the document it
@@ -112,6 +122,13 @@ reasoning and what adding either would look like.
   (regenerates the file - a separate, slower `Category=Slow` test group actually executes
   each one via `dotnet fsi`), `document.xml`, and `document.json` - one folder always has
   four views of the same example.
+- `tests/Kookerella.CsWordDsl.Tests` - `DriftGuardTests.cs` (a reflection-based tripwire
+  checking the C# wrapper's DU mirrors haven't fallen behind the F# core's own case
+  counts), `DocumentTests.cs` (targeted round-trip assertions per feature),
+  `ExampleTests.cs` (reloads the F# suite's own checked-in `Examples/*/output.docx`
+  fixtures rather than re-authoring every scenario a second time), `CsCodeGenTests.cs`
+  (actually executes a generated file via `dotnet run --file`, the C# analog of the F#
+  suite's `Category=Slow` `dotnet fsi` group).
 - `samples/Kookerella.FsWordDsl.Sample` - a small console app that builds a document, saves
   it, and reads it back.
 
@@ -404,6 +421,54 @@ Kookerella.FsWordDsl.Tests/Examples/` has a committed `script.fsx` generated exa
 way; the `Category=Slow` test group actually executes each one via `dotnet fsi` and checks
 it reproduces the committed `.docx`.
 
+## The C# wrapper
+
+`Kookerella.CsWordDsl` is an idiomatic, immutable, fluent C# wrapper over the F# core, for
+callers who'd rather not touch F# discriminated unions or option types directly. Every F#
+type has a C# mirror: plain records with `With*`/factory-method builders for product types,
+`enum`s for parameterless choices, and `sealed record` closed hierarchies (`abstract record`
+base, private constructor, nested cases) for everything else - the same "sealed hierarchy"
+pattern the Excel repo's own `Kookerella.CsOpenXmlDsl` uses for `CellValue`/
+`ConditionalFormatRule`. Reference `Kookerella.CsWordDsl` instead of `Kookerella.FsWordDsl`
+and never see an `FSharpOption`:
+
+```csharp
+using Kookerella.CsWordDsl;
+
+var doc = Document.Create(
+    Section.Of([
+        Block.Paragraph([new Inline.Run("Quarterly Report")], styleId: "Title"),
+        Block.Paragraph([
+            new Inline.Run("This report covers "),
+            new Inline.Run("Q1 2026", new RunStyle { Bold = true }),
+            Inline.HyperlinkText("full dataset", new HyperlinkTarget.ExternalUrl("https://example.com/data")),
+            new Inline.Run(" for details.")
+        ])
+    ]));
+
+DocumentIO.Save(doc, "report.docx");
+var loaded = DocumentIO.Load("report.docx");
+```
+
+Content controls, tables, track changes, comments, and every other feature the F# core
+models are covered the same way - see `tests/Kookerella.CsWordDsl.Tests/DocumentTests.cs`
+for a worked example per feature. `CsCodeGen.Generate` is the C# analog of
+`Document.generateScript`: it renders a `Document` back out as a self-contained C# file
+targeting .NET's "file-based apps" feature (`dotnet run --file script.cs`), rather than an
+`.fsx` script:
+
+```csharp
+var script = CsCodeGen.Generate(["#:project path/to/Kookerella.CsWordDsl.csproj"], "output.docx", loaded);
+File.WriteAllText("regenerate.cs", script);
+```
+
+One design note worth stating explicitly: this wrapper's records use `IReadOnlyList<T>`
+properties, and C#'s compiler-synthesized record equality does not deep-compare list
+contents (two records holding equal-but-distinct list instances compare unequal via plain
+`.Equals()`) - the same limitation `Kookerella.CsOpenXmlDsl`'s own records have. Don't rely
+on whole-`Document` equality in your own code; compare the specific values you care about,
+the same way this repo's own `DocumentTests.cs` does.
+
 ## XML
 
 `Xml.toDocument`/`Xml.ofDocument` (in `Xml.fs`) are a third way in and out of the DSL,
@@ -504,3 +569,11 @@ dotnet test --filter "Category=Slow"
 ```
 
 Plain `dotnet test` (no filter) runs both groups.
+
+The C# wrapper's own suite has no fast/slow split - `CsCodeGenTests.cs` shells out to
+`dotnet run --file` itself, so a single run already covers the C# analog of the F# suite's
+slow group:
+
+```bash
+dotnet test tests/Kookerella.CsWordDsl.Tests
+```

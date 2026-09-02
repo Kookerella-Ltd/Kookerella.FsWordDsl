@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <!-- CS1591 (missing XML doc on a public member) is suppressed deliberately: this
+         codebase only documents members whose WHY isn't obvious from the name, not every
+         trivial property/method - matching Kookerella.CsOpenXmlDsl's own posture, and the
+         main F# project's own commenting philosophy. -->
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <Version>0.1.0</Version>
+    <Authors>Kookerella</Authors>
+    <Company>Kookerella Ltd</Company>
+    <Description>An idiomatic, immutable, fluent C# wrapper over Kookerella.FsWordDsl - build and read Word documents (.docx/.dotm) from C# without touching F# discriminated unions or option types directly. Unlike libraries that only build or mutate a document through an imperative API, this can also decompile an existing .docx/.dotm into idiomatic, runnable C# source that rebuilds it (CsCodeGen.Generate) - read a real document, get back the code that builds it. Covers every feature the F# core models: paragraphs and runs, named styles, numbered/bulleted lists, tables, images, hyperlinks, bookmarks, comments, sections and page setup, headers/footers, document protection, footnotes/endnotes, track changes, content controls, and VBA (as opaque bytes).</Description>
+    <PackageTags>csharp;word;docx;dotm;openxml;wordprocessingml;dsl;fluent;immutable</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageProjectUrl>https://github.com/Kookerella-Ltd/Kookerella.FsWordDsl</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/Kookerella-Ltd/Kookerella.FsWordDsl</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\..\LICENSE" Pack="true" PackagePath="/" />
+    <None Include="..\..\README.md" Pack="true" PackagePath="/" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Kookerella.FsWordDsl\Kookerella.FsWordDsl.fsproj" />
+  </ItemGroup>
+
+</Project>
