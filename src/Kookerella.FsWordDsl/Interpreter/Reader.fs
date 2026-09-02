@@ -201,16 +201,37 @@ module Reader =
                     |> Option.map (fun v -> v.Value = Office2010.Word.OnOffValues.One || v.Value = Office2010.Word.OnOffValues.True)
                     |> Option.defaultValue false
 
-                CheckBoxControl isChecked)
+                let checkedSymbol =
+                    cb.CheckedState
+                    |> opt
+                    |> Option.bind (fun s -> match s.Font |> opt, s.Val |> opt with
+                                              | Some f, Some v -> Some(f.Value, v.Value)
+                                              | _ -> None)
+
+                let uncheckedSymbol =
+                    cb.UncheckedState
+                    |> opt
+                    |> Option.bind (fun s -> match s.Font |> opt, s.Val |> opt with
+                                              | Some f, Some v -> Some(f.Value, v.Value)
+                                              | _ -> None)
+
+                CheckBoxControl(isChecked, checkedSymbol, uncheckedSymbol))
 
         [ text; dropdown; combo; date; checkbox ] |> List.tryPick id |> Option.defaultValue RichTextControl
 
+    let private lockOfW (v: Wordprocessing.LockingValues) : ContentControlLock option =
+        if v = Wordprocessing.LockingValues.SdtLocked then Some LockDeletion
+        elif v = Wordprocessing.LockingValues.ContentLocked then Some LockContentEditing
+        elif v = Wordprocessing.LockingValues.SdtContentLocked then Some LockDeletionAndContentEditing
+        else None
+
     let private contentControlPropsOfW (sdtPr: Wordprocessing.SdtProperties option) : ContentControlProps =
         match sdtPr with
-        | None -> { Alias = None; Tag = None; Type = RichTextControl }
+        | None -> { Alias = None; Tag = None; Lock = None; Type = RichTextControl }
         | Some pr ->
             { Alias = pr.GetFirstChild<Wordprocessing.SdtAlias>() |> opt |> Option.bind (fun a -> a.Val |> opt) |> Option.map (fun v -> v.Value)
               Tag = pr.GetFirstChild<Wordprocessing.Tag>() |> opt |> Option.bind (fun t -> t.Val |> opt) |> Option.map (fun v -> v.Value)
+              Lock = pr.GetFirstChild<Wordprocessing.Lock>() |> opt |> Option.bind (fun l -> l.Val |> opt) |> Option.bind (fun v -> lockOfW v.Value)
               Type = contentControlTypeOfW pr }
 
     let rec private parseInlineRange

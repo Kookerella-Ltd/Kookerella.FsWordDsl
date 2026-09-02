@@ -51,9 +51,13 @@ contains something unmodeled:
   with an explicit `Fallback` RGB and optional tint/shade - since this DSL has no theme
   part (`word/theme/theme1.xml`) to resolve a token against, real Word does the resolving,
   the same "always also write a computed value" convention Word itself follows so a
-  themeless reader still sees something reasonable. Only modeled for run color and
-  shading/fill backgrounds (`RunStyle.Color`, `ParagraphFormat.Shading`, `TableCellProps.
-  Shading`, `TableStyleRegion.CellShading`) - see the gap below on border colors.
+  themeless reader still sees something reasonable. Modeled for run color, shading/fill
+  backgrounds (`RunStyle.Color`, `ParagraphFormat.Shading`, `TableCellProps.Shading`,
+  `TableStyleRegion.CellShading`), and border colors (`BorderSide.Color` - shared by
+  paragraph borders, table borders, cell borders, and table-style-definition borders,
+  since they all funnel through the same six `borderSideTo*`/`borderSideOf*` helpers) -
+  see the gap below on `w:highlight`, which has no theme-color concept in OOXML at all
+  (a fixed 16-color palette, confirmed by reflection), so it's out of reach regardless.
 - **Named styles** (`styles.xml`): paragraph and character styles, with `BasedOn`
   inheritance (the chain itself isn't resolved by this DSL - see the gap below) and a
   small built-in catalog (`BuiltInStyles.normal`/`heading1`/`2`/`3`/`title`/
@@ -80,11 +84,11 @@ contains something unmodeled:
   table is exactly how Word itself represents one.
 - **Custom table style definitions** (`TableStyleDefinition`, `styles.xml` `w:type="table"`
   entries, referenced from `Document.TableStyles` by a `TableStyleRef.Name` the same way a
-  built-in name is): base table borders, plus eleven of OOXML's thirteen conditional-
-  formatting regions - whole-table defaults, first/last row, first/last column, one band
-  per banding axis (`BandedRow`/`BandedColumn`), and all four corner cells - each with its
-  own run/paragraph formatting and cell shading. See the gap below on the two regions not
-  covered.
+  built-in name is): base table borders, plus all thirteen of OOXML's conditional-
+  formatting regions - whole-table defaults, first/last row, first/last column, both bands
+  of each banding axis (`BandedRow`/`BandedColumn` for the odd/first band, `BandedRow2`/
+  `BandedColumn2` for the even/second band), and all four corner cells - each with its own
+  run/paragraph formatting and cell shading.
 - **Images**: PNG/JPEG/GIF/BMP raster images anchored inline within a run (the natural
   placement for Word, unlike Excel's cell-range anchor) - `Data` is the image file's own
   raw bytes, embedded and read back byte-for-byte with no decoding/re-encoding.
@@ -163,19 +167,26 @@ contains something unmodeled:
   the ones actually common in real-world templates - via `Inline.InlineContentControl`
   (run-level, inside a paragraph) and `Block.ContentControlBlock` (block-level, wrapping
   whole paragraphs/tables), both carrying a shared `ContentControlProps` (`Alias`/`Tag` -
-  `w:alias`/`w:tag` - plus a `ContentControlType`). See `ContentControls.fs`'s own doc
-  comment for the exact shape of each: plain text (single- or multi-line), rich text (the
-  default when no type marker is present), dropdown list and combo box (identical
-  `(displayText, value) list` shape, differing only in whether free typing is allowed),
-  date picker (`fullDate`/`format` metadata, alongside the control's own displayed text in
-  `content`), and checkbox (checked/unchecked only - reached via a different SDK
+  `w:alias`/`w:tag`; `Lock` - `w:lock`, see below - plus a `ContentControlType`). See
+  `ContentControls.fs`'s own doc comment for the exact shape of each: plain text (single-
+  or multi-line), rich text (the default when no type marker is present), dropdown list
+  and combo box (identical `(displayText, value) list` shape, differing only in whether
+  free typing is allowed), date picker (`fullDate`/`format` metadata, alongside the
+  control's own displayed text in `content`), and checkbox (reached via a different SDK
   namespace, `Office2010.Word.SdtContentCheckBox`/`w14:checkbox` on the wire, than every
-  other control kind here). A control's own currently-displayed content (typed text, the
-  selected dropdown/date value, ...) is ordinary caller-authored `Inline`/`Block` content
-  in `content` - the same "this DSL never evaluates anything, it just carries what's
-  there" posture `Inline.Field`'s `cachedResult` takes. See the gap below on what isn't
-  covered: picture/group/repeating-section/citation/bibliography controls, XML data
-  binding, placeholder text, custom checked/unchecked glyphs, and editing locks.
+  other control kind here) - checked/unchecked state, plus an optional custom
+  checked/unchecked glyph per state (`checkedSymbol`/`uncheckedSymbol`, each a `(font,
+  hexCharCode)` pair, e.g. `("Wingdings", "2612")` - `w14:checkedState`/
+  `w14:uncheckedState`). `ContentControlProps.Lock` (`w:lock`) restricts editing a
+  control: `LockDeletion` (the control can't be deleted, content still editable),
+  `LockContentEditing` (content can't be edited, control still deletable), or
+  `LockDeletionAndContentEditing` (neither) - `None` is Word's own default (unlocked, not
+  written). A control's own currently-displayed content (typed text, the selected
+  dropdown/date value, ...) is ordinary caller-authored `Inline`/`Block` content in
+  `content` - the same "this DSL never evaluates anything, it just carries what's there"
+  posture `Inline.Field`'s `cachedResult` takes. See the gap below on what isn't covered:
+  picture/group/repeating-section/citation/bibliography controls, XML data binding, and
+  placeholder text.
 - **Track changes** (`w:ins`/`w:del`), narrowly scoped to the case that actually matters for
   almost every real redlined document: `Inline.TrackedChange` wraps arbitrary inline content
   the same way `Bookmark`/`Comment` do, marking it inserted or deleted with an author and a
@@ -204,27 +215,18 @@ contains something unmodeled:
   "glossary document" part by name for the placeholder's own text rather than carrying it
   inline, which is a real extra part-authoring concern this DSL doesn't take on; a
   control's `content` still carries whatever is actually typed in, so this only matters
-  for an empty, never-filled-in control. Editing locks (`w:lock` - whether a control/its
-  content can be deleted or edited) and checkbox custom checked/unchecked glyphs
-  (`w14:checkedState`/`w14:uncheckedState` - a non-default symbol font character instead
-  of Word's plain checkmark/empty box) aren't modeled either. `w:customXml` wrappers are
-  still unwrapped rather than modeled (see the note above on `Reader`'s own resilience
-  posture) - unlike `w:sdt`, nothing here represents the wrapper itself, only recovers the
-  content inside it.
+  for an empty, never-filled-in control. `w:customXml` wrappers are still unwrapped rather
+  than modeled (see the note above on `Reader`'s own resilience posture) - unlike `w:sdt`,
+  nothing here represents the wrapper itself, only recovers the content inside it.
 - **Real field computation.** Only raw instruction text + a cached display value round-trip
   (see "Modeled faithfully" above) - a table of contents, cross-reference, or any other
   field that depends on document layout is never actually computed by this DSL, unlike
   Excel's pivot tables (which *do* perform real aggregation at write time).
-- **The "second" band of each table-style banding axis.** `TableStyleDefinition.
-  BandedRow`/`BandedColumn` apply to the odd/first band only (`w:type="band1Horz"`/
-  `"band1Vert"`) - a distinct look for the even band (`band2Horz`/`band2Vert`) isn't
-  modeled, since in practice a banded table's "off" band is just `WholeTable`'s own
-  default background showing through (see "Modeled faithfully" above for the eleven
-  regions that *are* covered).
-- **Theme colors on borders, and theme colors used in `w:highlight`.** `BorderSide.Color`
-  round-trips a `Theme` value as its `Fallback` RGB only (the theme token itself isn't
-  preserved there - see "Modeled faithfully" above); `RunStyle.Highlight`'s fixed
-  16-color palette has no theme-color concept in OOXML at all, so this doesn't apply to it.
+- **Theme colors used in `w:highlight`.** `RunStyle.Highlight`'s fixed 16-color palette has
+  no theme-color concept in OOXML at all (confirmed by reflection - `HighlightColorValues`
+  is a closed set of named colors, nothing theme-relative) - unlike border/run/shading
+  colors (see "Modeled faithfully" above), this is a hard limit of the format itself, not
+  a DSL gap that could be closed.
 - **Text boxes, SmartArt, embedded charts/OLE objects.** Not modeled - a Word document's
   drawing canvas is used here only for the one inline-image case (see "Modeled faithfully"
   above).

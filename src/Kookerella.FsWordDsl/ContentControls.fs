@@ -31,11 +31,25 @@ module ContentControls =
         /// `Office2010.Word.SdtContentCheckBox` on the wire (`w14:checkbox`) - a different
         /// SDK namespace from every other control kind here, which all live under
         /// `Wordprocessing` - see `Interpreter/Writer.fs`/`Reader.fs`'s own notes on this
-        /// case for the qualification this needs. Only the checked/unchecked state itself
-        /// is modeled, not custom checked/unchecked glyphs (`w14:checkedState`/
-        /// `w14:uncheckedState`, which pick a non-default symbol font character) - a
-        /// documented gap, narrower than what real Word's checkbox control can do.
-        | CheckBoxControl of checked_: bool
+        /// case for the qualification this needs. `checkedSymbol`/`uncheckedSymbol` are the
+        /// custom checked/unchecked glyphs (`w14:checkedState`/`w14:uncheckedState`) as
+        /// `(font, hexCharCode) option` - e.g. `Some("Wingdings", "2612")` for a filled
+        /// checkbox glyph - `None` leaves Word's own plain checkmark/empty-box default.
+        | CheckBoxControl of checked_: bool * checkedSymbol: (string * string) option * uncheckedSymbol: (string * string) option
+
+    /// Which of Word's `w:lock` values (`w:sdtPr/w:lock`) restrict editing a content
+    /// control - `None` on `ContentControlProps.Lock` is Word's own default (`unlocked`,
+    /// not written), same "only write what differs from the default" posture the rest of
+    /// this DSL takes.
+    type ContentControlLock =
+        /// `sdtLocked` - the control itself can't be deleted, but its content can still be
+        /// edited.
+        | LockDeletion
+        /// `contentLocked` - the control's content can't be edited, but the control itself
+        /// can still be deleted.
+        | LockContentEditing
+        /// `sdtContentLocked` - neither the control nor its content can be edited.
+        | LockDeletionAndContentEditing
 
     /// `Alias`/`Tag` are Word's own `w:alias` (human-readable title, shown in Word's UI)
     /// and `w:tag` (machine-readable id, for programmatic lookup) - both optional, same as
@@ -43,4 +57,5 @@ module ContentControls =
     type ContentControlProps =
         { Alias: string option
           Tag: string option
+          Lock: ContentControlLock option
           Type: ContentControlType }

@@ -31,6 +31,8 @@
       <xs:element name="lastColumn" type="tableStyleRegionType" minOccurs="0" />
       <xs:element name="bandedRow" type="tableStyleRegionType" minOccurs="0" />
       <xs:element name="bandedColumn" type="tableStyleRegionType" minOccurs="0" />
+      <xs:element name="bandedRow2" type="tableStyleRegionType" minOccurs="0" />
+      <xs:element name="bandedColumn2" type="tableStyleRegionType" minOccurs="0" />
       <xs:element name="northEastCell" type="tableStyleRegionType" minOccurs="0" />
       <xs:element name="northWestCell" type="tableStyleRegionType" minOccurs="0" />
       <xs:element name="southEastCell" type="tableStyleRegionType" minOccurs="0" />
@@ -197,6 +199,7 @@
     </xs:sequence>
     <xs:attribute name="alias" type="xs:string" />
     <xs:attribute name="tag" type="xs:string" />
+    <xs:attribute name="lock" type="xs:string" />
   </xs:complexType>
 
   <xs:complexType name="contentControlBlockType">
@@ -212,6 +215,7 @@
     </xs:sequence>
     <xs:attribute name="alias" type="xs:string" />
     <xs:attribute name="tag" type="xs:string" />
+    <xs:attribute name="lock" type="xs:string" />
   </xs:complexType>
 
   <xs:complexType name="plainTextControlType">
@@ -237,6 +241,10 @@
 
   <xs:complexType name="checkBoxControlType">
     <xs:attribute name="checked" type="xs:boolean" use="required" />
+    <xs:attribute name="checkedFont" type="xs:string" />
+    <xs:attribute name="checkedCode" type="xs:string" />
+    <xs:attribute name="uncheckedFont" type="xs:string" />
+    <xs:attribute name="uncheckedCode" type="xs:string" />
   </xs:complexType>
 
   <!-- A cross-paragraph bookmark boundary marker (`Inline.BookmarkRangeStart`/`End`) -

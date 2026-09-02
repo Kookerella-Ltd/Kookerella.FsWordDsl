@@ -160,13 +160,13 @@ type DocumentDsl =
 
     /// A run-level content control (`w:sdt`), sitting inside a single paragraph. See
     /// `ContentControls.fs`'s own doc comment for what `controlType` can be.
-    static member contentControl(content: Inline list, controlType: ContentControlType, ?alias: string, ?tag: string) : Inline =
-        InlineContentControl({ Alias = alias; Tag = tag; Type = controlType }, content)
+    static member contentControl(content: Inline list, controlType: ContentControlType, ?alias: string, ?tag: string, ?lock: ContentControlLock) : Inline =
+        InlineContentControl({ Alias = alias; Tag = tag; Lock = lock; Type = controlType }, content)
 
     /// The block-level counterpart, wrapping whole paragraphs/tables rather than sitting
     /// inside one paragraph.
-    static member contentControlBlock(content: Block list, controlType: ContentControlType, ?alias: string, ?tag: string) : Block =
-        ContentControlBlock({ Alias = alias; Tag = tag; Type = controlType }, content)
+    static member contentControlBlock(content: Block list, controlType: ContentControlType, ?alias: string, ?tag: string, ?lock: ContentControlLock) : Block =
+        ContentControlBlock({ Alias = alias; Tag = tag; Lock = lock; Type = controlType }, content)
 
     static member tableCell(content: Block list, ?props: TableCellProps) : TableCell =
         { Content = content

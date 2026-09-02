@@ -469,6 +469,28 @@ module Json =
     let private markRevisionToJson (r: Revision) : JsonNode =
         obj_ [ "kind", Some(jstr (revisionKindToStr r.Kind)); "author", Some(jstr r.Author); "date", r.Date |> Option.map (fun d -> jstr (d.ToString("o"))) ] :> JsonNode
 
+    let private contentControlLockToStr (l: ContentControlLock) : string =
+        match l with
+        | LockDeletion -> "lockDeletion"
+        | LockContentEditing -> "lockContentEditing"
+        | LockDeletionAndContentEditing -> "lockDeletionAndContentEditing"
+
+    let private contentControlLockOfStr (s: string) : ContentControlLock =
+        match s with
+        | "lockContentEditing" -> LockContentEditing
+        | "lockDeletionAndContentEditing" -> LockDeletionAndContentEditing
+        | _ -> LockDeletion
+
+    let private symbolToJson (symbol: (string * string) option) : JsonNode option =
+        symbol |> Option.map (fun (font, code) -> obj_ [ "font", Some(jstr font); "code", Some(jstr code) ] :> JsonNode)
+
+    let private symbolOfJson (o: JsonObject) (name: string) : (string * string) option =
+        match prop name o with
+        | Some s -> (match str "font" s, str "code" s with
+                     | Some font, Some code -> Some(font, code)
+                     | _ -> None)
+        | None -> None
+
     /// Same single-key-object-per-case convention this file uses throughout - shared by
     /// `Inline.InlineContentControl` and `Block.ContentControlBlock` below, which differ
     /// only in whether `content` holds `Inline`s or `Block`s.
@@ -485,7 +507,14 @@ module Json =
             :> JsonNode
         | DateControl(fullDate, format) ->
             obj_ [ "date", Some(obj_ [ "fullDate", fullDate |> Option.map (fun d -> jstr (d.ToString("o"))); "format", format |> Option.map jstr ] :> JsonNode) ] :> JsonNode
-        | CheckBoxControl checked_ -> obj_ [ "checkBox", Some(obj_ [ "checked", Some(jbool checked_) ] :> JsonNode) ] :> JsonNode
+        | CheckBoxControl(checked_, checkedSymbol, uncheckedSymbol) ->
+            obj_
+                [ "checkBox",
+                  Some(
+                      obj_ [ "checked", Some(jbool checked_); "checkedSymbol", symbolToJson checkedSymbol; "uncheckedSymbol", symbolToJson uncheckedSymbol ]
+                      :> JsonNode
+                  ) ]
+            :> JsonNode
 
     let private contentControlTypeOfJson (n: JsonNode) : ContentControlType =
         match n with
@@ -503,12 +532,16 @@ module Json =
                 let d = o.["date"].AsObject()
                 DateControl(str "fullDate" d |> Option.map DateTime.Parse, str "format" d)
             elif not (isNull o.["checkBox"]) then
-                CheckBoxControl(boolean "checked" (o.["checkBox"].AsObject()))
+                let c = o.["checkBox"].AsObject()
+                CheckBoxControl(boolean "checked" c, symbolOfJson c "checkedSymbol", symbolOfJson c "uncheckedSymbol")
             else
                 RichTextControl
 
     let private contentControlPropsToJsonPairs (props: ContentControlProps) : (string * JsonNode option) list =
-        [ "alias", props.Alias |> Option.map jstr; "tag", props.Tag |> Option.map jstr; "type", Some(contentControlTypeToJson props.Type) ]
+        [ "alias", props.Alias |> Option.map jstr
+          "tag", props.Tag |> Option.map jstr
+          "lock", props.Lock |> Option.map (contentControlLockToStr >> jstr)
+          "type", Some(contentControlTypeToJson props.Type) ]
 
     /// `contentControlTypeOfJson` (not `prop "type" o`) - the `type` value is a bare
     /// string for `RichTextControl` but a single-key object for every other case (same
@@ -518,6 +551,7 @@ module Json =
     let private contentControlPropsOfJson (o: JsonObject) : ContentControlProps =
         { Alias = str "alias" o
           Tag = str "tag" o
+          Lock = str "lock" o |> Option.map contentControlLockOfStr
           Type = (match o.["type"] with null -> RichTextControl | n -> contentControlTypeOfJson n) }
 
     // `Endnote`'s own body is a `Block list`), which need `paragraphToJson`/
@@ -965,6 +999,8 @@ module Json =
               "lastColumn", tableStyleRegionToJson d.LastColumn
               "bandedRow", tableStyleRegionToJson d.BandedRow
               "bandedColumn", tableStyleRegionToJson d.BandedColumn
+              "bandedRow2", tableStyleRegionToJson d.BandedRow2
+              "bandedColumn2", tableStyleRegionToJson d.BandedColumn2
               "northEastCell", tableStyleRegionToJson d.NorthEastCell
               "northWestCell", tableStyleRegionToJson d.NorthWestCell
               "southEastCell", tableStyleRegionToJson d.SouthEastCell
@@ -986,6 +1022,8 @@ module Json =
           LastColumn = regionOf "lastColumn"
           BandedRow = regionOf "bandedRow"
           BandedColumn = regionOf "bandedColumn"
+          BandedRow2 = regionOf "bandedRow2"
+          BandedColumn2 = regionOf "bandedColumn2"
           NorthEastCell = regionOf "northEastCell"
           NorthWestCell = regionOf "northWestCell"
           SouthEastCell = regionOf "southEastCell"

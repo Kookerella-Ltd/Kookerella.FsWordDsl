@@ -59,7 +59,7 @@ reasoning and what adding either would look like.
     numbering).
   - `Tables.fs` - `TableBorders`, `VerticalMergeKind`, `TableCellProps` (including a
     per-cell `Margins` override), `TableStyleRef`, `TableStyleRegion`/
-    `TableStyleDefinition` (custom table style definitions - eleven of OOXML's thirteen
+    `TableStyleDefinition` (custom table style definitions - all thirteen of OOXML's
     conditional-formatting regions), and `CellMargins` (shared shape for a table's default
     margins and a single cell's own override).
   - `Images.fs` - `ImageFormat`, `ImageEntry` (raw file bytes plus an on-page size),

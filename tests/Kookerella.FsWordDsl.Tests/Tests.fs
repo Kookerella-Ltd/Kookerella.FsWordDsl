@@ -459,11 +459,17 @@ let ``ContentControls`` () =
                           contentControl (
                               [ run "March 1, 2024" ],
                               DateControl(Some(DateTime(2024, 3, 1)), Some "MMMM d, yyyy"),
-                              alias = "Meeting Date"
+                              alias = "Meeting Date",
+                              lock = LockContentEditing
                           ) ]
                     para
                         [ run "Agreed: "
-                          contentControl ([ run "☑" ], CheckBoxControl true, tag = "agreed") ]
+                          contentControl (
+                              [ run "☑" ],
+                              CheckBoxControl(true, Some("Wingdings", "2612"), Some("Wingdings", "2610")),
+                              tag = "agreed",
+                              lock = LockDeletionAndContentEditing
+                          ) ]
                     contentControlBlock(
                         [ para [ run "This whole paragraph is a rich-text content control." ] ],
                         RichTextControl,
@@ -586,7 +592,10 @@ let ``DocumentProperties`` () =
 
 [<Fact>]
 let ``Table_CustomStyleAndHeaderRow`` () =
-    let thin: BorderSide = { Style = SingleLine; Width = Some 0.5; Color = Some Color.black }
+    // `Theme(Accent1Theme, ...)` exercises theme colors on border sides round-tripping
+    // through `w:top`'s own `w:themeColor`/`w:themeTint`, not just the plain fallback hex
+    // `colorToHex` writes regardless of `Color` case.
+    let thin: BorderSide = { Style = SingleLine; Width = Some 0.5; Color = Some(Theme(Accent1Theme, (0x4Fuy, 0x81uy, 0xBDuy), Some 0.2, None)) }
 
     let customStyle: TableStyleDefinition =
         { TableStyleDefinition.Default with
@@ -605,6 +614,10 @@ let ``Table_CustomStyleAndHeaderRow`` () =
             FirstColumn = { TableStyleRegion.None with RunFormat = Some { RunStyle.Default with Bold = true } }
             BandedRow = { TableStyleRegion.None with CellShading = Some(Rgb(0xDCuy, 0xE6uy, 0xF1uy)) }
             BandedColumn = { TableStyleRegion.None with CellShading = Some(Rgb(0xF2uy, 0xF2uy, 0xF2uy)) }
+            // The "second"/even band of each banding axis - previously undistinguished
+            // from `WholeTable`'s own default background, now its own conditional region.
+            BandedRow2 = { TableStyleRegion.None with CellShading = Some(Rgb(0xEEuy, 0xEEuy, 0xEEuy)) }
+            BandedColumn2 = { TableStyleRegion.None with CellShading = Some(Rgb(0xFAuy, 0xFAuy, 0xFAuy)) }
             NorthWestCell = { TableStyleRegion.None with CellShading = Some(Rgb(0x2Duy, 0x50uy, 0x82uy)) } }
 
     let cell (text: string) (width: float) = tableCell ([ para [ run text ] ], props = { TableCellProps.Default with Width = Some width })

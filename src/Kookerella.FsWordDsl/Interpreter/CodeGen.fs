@@ -161,16 +161,23 @@ module CodeGen =
 
     let private renderDate (d: System.DateTime) : string = sprintf "System.DateTime.Parse(%s)" (quote (d.ToString("o")))
 
+    let private renderSymbol (symbol: (string * string) option) : string = renderOption (renderTuple2 quote quote) symbol
+
     let private renderContentControlType (t: ContentControlType) : string =
         match t with
         | RichTextControl -> "RichTextControl"
         | PlainTextControl multiLine -> sprintf "PlainTextControl(%b)" multiLine
         | DropDownControl(items, editable) -> sprintf "DropDownControl(%s, %b)" (renderList (renderTuple2 quote quote) items) editable
         | DateControl(fullDate, format) -> sprintf "DateControl(%s, %s)" (renderOption renderDate fullDate) (renderOption quote format)
-        | CheckBoxControl checked_ -> sprintf "CheckBoxControl(%b)" checked_
+        | CheckBoxControl(checked_, checkedSymbol, uncheckedSymbol) -> sprintf "CheckBoxControl(%b, %s, %s)" checked_ (renderSymbol checkedSymbol) (renderSymbol uncheckedSymbol)
 
     let private renderContentControlProps (p: ContentControlProps) : string =
-        sprintf "{ Alias = %s; Tag = %s; Type = %s }" (renderOption quote p.Alias) (renderOption quote p.Tag) (renderContentControlType p.Type)
+        sprintf
+            "{ Alias = %s; Tag = %s; Lock = %s; Type = %s }"
+            (renderOption quote p.Alias)
+            (renderOption quote p.Tag)
+            (renderOption (sprintf "%A") p.Lock)
+            (renderContentControlType p.Type)
 
     let rec private renderInline (i: Inline) : string =
         match i with
@@ -330,7 +337,7 @@ module CodeGen =
 
     let private renderTableStyleDefinition (d: TableStyleDefinition) : string =
         sprintf
-            "{ Id = %s; Name = %s; BasedOn = %s; Borders = %s; WholeTable = %s; FirstRow = %s; LastRow = %s; FirstColumn = %s; LastColumn = %s; BandedRow = %s; BandedColumn = %s; NorthEastCell = %s; NorthWestCell = %s; SouthEastCell = %s; SouthWestCell = %s }"
+            "{ Id = %s; Name = %s; BasedOn = %s; Borders = %s; WholeTable = %s; FirstRow = %s; LastRow = %s; FirstColumn = %s; LastColumn = %s; BandedRow = %s; BandedColumn = %s; BandedRow2 = %s; BandedColumn2 = %s; NorthEastCell = %s; NorthWestCell = %s; SouthEastCell = %s; SouthWestCell = %s }"
             (quote d.Id)
             (quote d.Name)
             (renderOption quote d.BasedOn)
@@ -342,6 +349,8 @@ module CodeGen =
             (renderTableStyleRegion d.LastColumn)
             (renderTableStyleRegion d.BandedRow)
             (renderTableStyleRegion d.BandedColumn)
+            (renderTableStyleRegion d.BandedRow2)
+            (renderTableStyleRegion d.BandedColumn2)
             (renderTableStyleRegion d.NorthEastCell)
             (renderTableStyleRegion d.NorthWestCell)
             (renderTableStyleRegion d.SouthEastCell)

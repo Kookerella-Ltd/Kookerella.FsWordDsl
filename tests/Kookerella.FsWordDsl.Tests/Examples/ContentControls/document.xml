@@ -45,7 +45,7 @@
         </para>
         <para>
           <run>Meeting date: </run>
-          <contentControl alias="Meeting Date">
+          <contentControl alias="Meeting Date" lock="lockContentEditing">
             <date fullDate="2024-03-01T00:00:00.0000000" format="MMMM d, yyyy" />
             <content>
               <run>March 1, 2024</run>
@@ -54,8 +54,8 @@
         </para>
         <para>
           <run>Agreed: </run>
-          <contentControl tag="agreed">
-            <checkBox checked="true" />
+          <contentControl tag="agreed" lock="lockDeletionAndContentEditing">
+            <checkBox checked="true" checkedFont="Wingdings" checkedCode="2612" uncheckedFont="Wingdings" uncheckedCode="2610" />
             <content>
               <run>☑</run>
             </content>

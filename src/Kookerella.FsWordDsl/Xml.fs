@@ -453,9 +453,24 @@ module Xml =
     let private markRevisionToXml (r: Revision) : XElement =
         XElement(xn "markRevision", attr "kind" (revisionKindToStr r.Kind), attr "author" r.Author, attrOpt "date" (r.Date |> Option.map (fun d -> d.ToString("o"))))
 
+    let private contentControlLockToStr (l: ContentControlLock) : string =
+        match l with
+        | LockDeletion -> "lockDeletion"
+        | LockContentEditing -> "lockContentEditing"
+        | LockDeletionAndContentEditing -> "lockDeletionAndContentEditing"
+
+    let private contentControlLockOfStr (s: string) : ContentControlLock =
+        match s with
+        | "lockContentEditing" -> LockContentEditing
+        | "lockDeletionAndContentEditing" -> LockDeletionAndContentEditing
+        | _ -> LockDeletion
+
     /// The type-marker child of a `contentControl`/`contentControlBlock` element - one of
     /// `plainText`/`richText`/`dropDown`/`date`/`checkBox`, matching `ContentControlType`'s
     /// own cases. Shared by both the inline and block-level content control elements.
+    /// `checkBox`'s `checkedFont`/`checkedCode`/`uncheckedFont`/`uncheckedCode` are the
+    /// custom checked/unchecked glyph (`checkedSymbol`/`uncheckedSymbol`, each a `(font,
+    /// hexCharCode)` pair) - absent entirely when a symbol is `None`.
     let private contentControlTypeToXml (t: ContentControlType) : XElement =
         match t with
         | RichTextControl -> XElement(xn "richText")
@@ -468,20 +483,34 @@ module Xml =
             )
         | DateControl(fullDate, format) ->
             XElement(xn "date", attrOpt "fullDate" (fullDate |> Option.map (fun d -> d.ToString("o"))), attrOpt "format" format)
-        | CheckBoxControl checked_ -> XElement(xn "checkBox", attr "checked" checked_)
+        | CheckBoxControl(checked_, checkedSymbol, uncheckedSymbol) ->
+            XElement(
+                xn "checkBox",
+                attr "checked" checked_,
+                attrOpt "checkedFont" (checkedSymbol |> Option.map fst),
+                attrOpt "checkedCode" (checkedSymbol |> Option.map snd),
+                attrOpt "uncheckedFont" (uncheckedSymbol |> Option.map fst),
+                attrOpt "uncheckedCode" (uncheckedSymbol |> Option.map snd)
+            )
 
     let private contentControlTypeOfXml (el: XElement) : ContentControlType =
+        let symbolOf (fontAttr: string) (codeAttr: string) =
+            match strAttr fontAttr el, strAttr codeAttr el with
+            | Some font, Some code -> Some(font, code)
+            | _ -> None
+
         match el.Name.LocalName with
         | "plainText" -> PlainTextControl(boolAttr "multiLine" el)
         | "dropDown" -> DropDownControl(el.Elements(xn "item") |> Seq.map (fun i -> i.Attribute(xn "displayText").Value, i.Attribute(xn "value").Value) |> List.ofSeq, boolAttr "editable" el)
         | "date" -> DateControl(strAttr "fullDate" el |> Option.map DateTime.Parse, strAttr "format" el)
-        | "checkBox" -> CheckBoxControl(boolAttr "checked" el)
+        | "checkBox" -> CheckBoxControl(boolAttr "checked" el, symbolOf "checkedFont" "checkedCode", symbolOf "uncheckedFont" "uncheckedCode")
         | _ -> RichTextControl
 
     let private contentControlPropsOfXml (el: XElement) : ContentControlProps =
         let typeEl = el.Elements() |> Seq.find (fun c -> c.Name.LocalName <> "content")
         { Alias = strAttr "alias" el
           Tag = strAttr "tag" el
+          Lock = strAttr "lock" el |> Option.map contentControlLockOfStr
           Type = contentControlTypeOfXml typeEl }
 
     // `inlineToXml`/`inlineOfXml` need `blockToXml`/`blockOfXml` (a `Footnote`/`Endnote`'s
@@ -533,6 +562,7 @@ module Xml =
                 xn "contentControl",
                 attrOpt "alias" props.Alias,
                 attrOpt "tag" props.Tag,
+                attrOpt "lock" (props.Lock |> Option.map contentControlLockToStr),
                 contentControlTypeToXml props.Type,
                 XElement(xn "content", content |> List.map inlineToXml)
             )
@@ -601,6 +631,7 @@ module Xml =
                 xn "contentControlBlock",
                 attrOpt "alias" props.Alias,
                 attrOpt "tag" props.Tag,
+                attrOpt "lock" (props.Lock |> Option.map contentControlLockToStr),
                 contentControlTypeToXml props.Type,
                 XElement(xn "content", content |> List.map blockToXml)
             )
@@ -839,6 +870,8 @@ module Xml =
             tableStyleRegionToXml "lastColumn" d.LastColumn,
             tableStyleRegionToXml "bandedRow" d.BandedRow,
             tableStyleRegionToXml "bandedColumn" d.BandedColumn,
+            tableStyleRegionToXml "bandedRow2" d.BandedRow2,
+            tableStyleRegionToXml "bandedColumn2" d.BandedColumn2,
             tableStyleRegionToXml "northEastCell" d.NorthEastCell,
             tableStyleRegionToXml "northWestCell" d.NorthWestCell,
             tableStyleRegionToXml "southEastCell" d.SouthEastCell,
@@ -859,6 +892,8 @@ module Xml =
           LastColumn = regionOf "lastColumn"
           BandedRow = regionOf "bandedRow"
           BandedColumn = regionOf "bandedColumn"
+          BandedRow2 = regionOf "bandedRow2"
+          BandedColumn2 = regionOf "bandedColumn2"
           NorthEastCell = regionOf "northEastCell"
           NorthWestCell = regionOf "northWestCell"
           SouthEastCell = regionOf "southEastCell"

@@ -108,12 +108,12 @@
   <tableStyles>
     <tableStyleDef id="MyTableStyle" name="My Table Style">
       <tableBorders>
-        <left style="single" width="0.5" color="000000" />
-        <right style="single" width="0.5" color="000000" />
-        <top style="single" width="0.5" color="000000" />
-        <bottom style="single" width="0.5" color="000000" />
-        <insideHorizontal style="single" width="0.5" color="000000" />
-        <insideVertical style="single" width="0.5" color="000000" />
+        <left style="single" width="0.5" color="theme:accent1:4F81BD:0.2:" />
+        <right style="single" width="0.5" color="theme:accent1:4F81BD:0.2:" />
+        <top style="single" width="0.5" color="theme:accent1:4F81BD:0.2:" />
+        <bottom style="single" width="0.5" color="theme:accent1:4F81BD:0.2:" />
+        <insideHorizontal style="single" width="0.5" color="theme:accent1:4F81BD:0.2:" />
+        <insideVertical style="single" width="0.5" color="theme:accent1:4F81BD:0.2:" />
       </tableBorders>
       <firstRow cellShading="4F81BD">
         <runStyle bold="true" color="FFFFFF" />
@@ -126,6 +126,8 @@
       </firstColumn>
       <bandedRow cellShading="DCE6F1" />
       <bandedColumn cellShading="F2F2F2" />
+      <bandedRow2 cellShading="EEEEEE" />
+      <bandedColumn2 cellShading="FAFAFA" />
       <northWestCell cellShading="2D5082" />
     </tableStyleDef>
   </tableStyles>

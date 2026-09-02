@@ -282,10 +282,17 @@ module Writer =
     /// reflection - `Checked.Val : EnumValue<Office2010.Word.OnOffValues>`), so it must be
     /// qualified explicitly rather than via the ambient `Wordprocessing.OnOffValues` this
     /// file uses everywhere else.
+    let private lockToW (lock: ContentControlLock) : Wordprocessing.LockingValues =
+        match lock with
+        | LockDeletion -> Wordprocessing.LockingValues.SdtLocked
+        | LockContentEditing -> Wordprocessing.LockingValues.ContentLocked
+        | LockDeletionAndContentEditing -> Wordprocessing.LockingValues.SdtContentLocked
+
     let private contentControlPropsToW (props: ContentControlProps) : Wordprocessing.SdtProperties =
         let sdtPr = Wordprocessing.SdtProperties()
         props.Alias |> Option.iter (fun a -> sdtPr.AppendChild(Wordprocessing.SdtAlias(Val = StringValue a)) |> ignore)
         props.Tag |> Option.iter (fun t -> sdtPr.AppendChild(Wordprocessing.Tag(Val = StringValue t)) |> ignore)
+        props.Lock |> Option.iter (fun l -> sdtPr.AppendChild(Wordprocessing.Lock(Val = EnumValue(lockToW l))) |> ignore)
 
         match props.Type with
         | RichTextControl -> ()
@@ -305,10 +312,12 @@ module Writer =
             fullDate |> Option.iter (fun dt -> d.FullDate <- DateTimeValue dt)
             format |> Option.iter (fun f -> d.DateFormat <- Wordprocessing.DateFormat(Val = StringValue f))
             sdtPr.AppendChild(d) |> ignore
-        | CheckBoxControl checked_ ->
+        | CheckBoxControl(checked_, checkedSymbol, uncheckedSymbol) ->
             let cb = Office2010.Word.SdtContentCheckBox()
             let onOff = if checked_ then Office2010.Word.OnOffValues.One else Office2010.Word.OnOffValues.Zero
             cb.Checked <- Office2010.Word.Checked(Val = EnumValue onOff)
+            checkedSymbol |> Option.iter (fun (font, code) -> cb.CheckedState <- Office2010.Word.CheckedState(Font = StringValue font, Val = HexBinaryValue code))
+            uncheckedSymbol |> Option.iter (fun (font, code) -> cb.UncheckedState <- Office2010.Word.UncheckedState(Font = StringValue font, Val = HexBinaryValue code))
             sdtPr.AppendChild(cb) |> ignore
 
         sdtPr

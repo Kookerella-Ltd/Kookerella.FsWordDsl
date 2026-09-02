@@ -88,10 +88,7 @@ module Tables =
     /// One conditional-formatting region within a custom table style (`w:tblStylePr`).
     /// OOXML defines thirteen possible regions (whole table, first/last row, first/last
     /// column, two banding axes - each with an "odd"/"first" and "even"/"second" band -
-    /// and four corner cells); `TableStyleDefinition` models eleven of them, leaving only
-    /// the "second"/even band of each banding axis undistinguished from `WholeTable`'s own
-    /// background (see that type's own doc comment) - same "narrow scope" posture the rest
-    /// of this module takes (e.g. `TableBorders` not modeling diagonal cell borders).
+    /// and four corner cells); `TableStyleDefinition` now models all thirteen.
     type TableStyleRegion =
         { RunFormat: RunStyle option
           ParaFormat: ParagraphFormat option
@@ -109,9 +106,10 @@ module Tables =
     /// one. Add it to `Document.TableStyles` (see `Builders.withTableStyles`) and reference
     /// its `Id` from `TableStyleRef.Name` the same way you'd reference a built-in name like
     /// `"TableGrid"`. `BandedRow`/`BandedColumn` apply to `w:type="band1Horz"`/`"band1Vert"`
-    /// (the odd/first band on each axis) only - a distinct look for the even band
-    /// (`band2Horz`/`band2Vert`) isn't modeled, since in practice a banded table's "off"
-    /// band is just `WholeTable`'s own default background showing through.
+    /// (the odd/first band on each axis); `BandedRow2`/`BandedColumn2` are the even band
+    /// (`band2Horz`/`band2Vert`) - in practice a banded table's "off" band is often left as
+    /// `TableStyleRegion.None`, since it's just `WholeTable`'s own default background
+    /// showing through, but a caller who wants a distinct look for it now can.
     type TableStyleDefinition =
         { Id: string
           Name: string
@@ -126,6 +124,8 @@ module Tables =
           LastColumn: TableStyleRegion
           BandedRow: TableStyleRegion
           BandedColumn: TableStyleRegion
+          BandedRow2: TableStyleRegion
+          BandedColumn2: TableStyleRegion
           /// The four corner cells (`w:type="neCell"`/`"nwCell"`/`"seCell"`/`"swCell"`) -
           /// where a row-band region and a column-band region would otherwise overlap.
           NorthEastCell: TableStyleRegion
@@ -145,6 +145,8 @@ module Tables =
               LastColumn = TableStyleRegion.None
               BandedRow = TableStyleRegion.None
               BandedColumn = TableStyleRegion.None
+              BandedRow2 = TableStyleRegion.None
+              BandedColumn2 = TableStyleRegion.None
               NorthEastCell = TableStyleRegion.None
               NorthWestCell = TableStyleRegion.None
               SouthEastCell = TableStyleRegion.None

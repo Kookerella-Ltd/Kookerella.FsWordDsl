@@ -222,6 +222,34 @@ module StyleRegistry =
 
     let borderSideOfWidthEighths (eighths: uint32) : float = float eighths / 8.0
 
+    /// The border-side equivalent of `applyThemeToColor`/`colorOfRunColor` - the six
+    /// border-side SDK classes below (`TopBorder`/`BottomBorder`/`LeftBorder`/
+    /// `RightBorder`/`InsideHorizontalBorder`/`InsideVerticalBorder`) each carry their own
+    /// `ThemeColor`/`ThemeTint`/`ThemeShade` (confirmed by reflection - same
+    /// `Wordprocessing.ThemeColorValues` enum run color uses), but don't share a common
+    /// settable-property interface F# can abstract over, so these two helpers work on the
+    /// raw pieces instead of a whole element - each `borderSideTo*`/`borderSideOf*` below
+    /// just plugs them in.
+    let private borderThemeAttrsOf (c: Color) : Wordprocessing.ThemeColorValues option * string option * string option =
+        match c with
+        | Theme(kind, _, tint, shade) -> Some(themeColorKindToW kind), tint |> Option.map tintToHexByte, shade |> Option.map tintToHexByte
+        | _ -> None, None, None
+
+    let private colorOfBorderThemeAttrs (hex: string option) (themeColor: Wordprocessing.ThemeColorValues option) (themeTint: string option) (themeShade: string option) : Color option =
+        hex
+        |> Option.map (fun hex ->
+            match themeColor with
+            | Some tc ->
+                Theme(
+                    themeColorKindOfW tc,
+                    (match colorOfHex hex with
+                     | Rgb(r, g, b) -> r, g, b
+                     | _ -> 0uy, 0uy, 0uy),
+                    themeTint |> Option.map hexByteToTint,
+                    themeShade |> Option.map hexByteToTint
+                )
+            | None -> colorOfHex hex)
+
     /// Shared by table borders (`Writer.fs`'s `TableBorders`/`TableCellBorders`) and
     /// paragraph borders (`w:pBdr`, below) - both contexts reuse the very same
     /// `TopBorder`/`LeftBorder`/`BottomBorder`/`RightBorder`/`InsideHorizontalBorder`/
@@ -229,63 +257,141 @@ module StyleRegistry =
     /// repo's `CLAUDE.md` on why that verification step matters for this SDK).
     let borderSideToTop (side: BorderSide) : Wordprocessing.TopBorder =
         let b = Wordprocessing.TopBorder(Val = EnumValue(borderLineStyleToW side.Style), Size = UInt32Value(borderSideWidthEighths side), Space = UInt32Value 0u)
-        side.Color |> Option.iter (fun c -> b.Color <- StringValue(colorToHex c))
+
+        side.Color
+        |> Option.iter (fun c ->
+            b.Color <- StringValue(colorToHex c)
+            let themeColor, themeTint, themeShade = borderThemeAttrsOf c
+            themeColor |> Option.iter (fun v -> b.ThemeColor <- EnumValue v)
+            themeTint |> Option.iter (fun v -> b.ThemeTint <- StringValue v)
+            themeShade |> Option.iter (fun v -> b.ThemeShade <- StringValue v))
+
         b
 
     let borderSideToBottom (side: BorderSide) : Wordprocessing.BottomBorder =
         let b = Wordprocessing.BottomBorder(Val = EnumValue(borderLineStyleToW side.Style), Size = UInt32Value(borderSideWidthEighths side), Space = UInt32Value 0u)
-        side.Color |> Option.iter (fun c -> b.Color <- StringValue(colorToHex c))
+
+        side.Color
+        |> Option.iter (fun c ->
+            b.Color <- StringValue(colorToHex c)
+            let themeColor, themeTint, themeShade = borderThemeAttrsOf c
+            themeColor |> Option.iter (fun v -> b.ThemeColor <- EnumValue v)
+            themeTint |> Option.iter (fun v -> b.ThemeTint <- StringValue v)
+            themeShade |> Option.iter (fun v -> b.ThemeShade <- StringValue v))
+
         b
 
     let borderSideToLeft (side: BorderSide) : Wordprocessing.LeftBorder =
         let b = Wordprocessing.LeftBorder(Val = EnumValue(borderLineStyleToW side.Style), Size = UInt32Value(borderSideWidthEighths side), Space = UInt32Value 0u)
-        side.Color |> Option.iter (fun c -> b.Color <- StringValue(colorToHex c))
+
+        side.Color
+        |> Option.iter (fun c ->
+            b.Color <- StringValue(colorToHex c)
+            let themeColor, themeTint, themeShade = borderThemeAttrsOf c
+            themeColor |> Option.iter (fun v -> b.ThemeColor <- EnumValue v)
+            themeTint |> Option.iter (fun v -> b.ThemeTint <- StringValue v)
+            themeShade |> Option.iter (fun v -> b.ThemeShade <- StringValue v))
+
         b
 
     let borderSideToRight (side: BorderSide) : Wordprocessing.RightBorder =
         let b = Wordprocessing.RightBorder(Val = EnumValue(borderLineStyleToW side.Style), Size = UInt32Value(borderSideWidthEighths side), Space = UInt32Value 0u)
-        side.Color |> Option.iter (fun c -> b.Color <- StringValue(colorToHex c))
+
+        side.Color
+        |> Option.iter (fun c ->
+            b.Color <- StringValue(colorToHex c)
+            let themeColor, themeTint, themeShade = borderThemeAttrsOf c
+            themeColor |> Option.iter (fun v -> b.ThemeColor <- EnumValue v)
+            themeTint |> Option.iter (fun v -> b.ThemeTint <- StringValue v)
+            themeShade |> Option.iter (fun v -> b.ThemeShade <- StringValue v))
+
         b
 
     let borderSideToInsideH (side: BorderSide) : Wordprocessing.InsideHorizontalBorder =
         let b = Wordprocessing.InsideHorizontalBorder(Val = EnumValue(borderLineStyleToW side.Style), Size = UInt32Value(borderSideWidthEighths side), Space = UInt32Value 0u)
-        side.Color |> Option.iter (fun c -> b.Color <- StringValue(colorToHex c))
+
+        side.Color
+        |> Option.iter (fun c ->
+            b.Color <- StringValue(colorToHex c)
+            let themeColor, themeTint, themeShade = borderThemeAttrsOf c
+            themeColor |> Option.iter (fun v -> b.ThemeColor <- EnumValue v)
+            themeTint |> Option.iter (fun v -> b.ThemeTint <- StringValue v)
+            themeShade |> Option.iter (fun v -> b.ThemeShade <- StringValue v))
+
         b
 
     let borderSideToInsideV (side: BorderSide) : Wordprocessing.InsideVerticalBorder =
         let b = Wordprocessing.InsideVerticalBorder(Val = EnumValue(borderLineStyleToW side.Style), Size = UInt32Value(borderSideWidthEighths side), Space = UInt32Value 0u)
-        side.Color |> Option.iter (fun c -> b.Color <- StringValue(colorToHex c))
+
+        side.Color
+        |> Option.iter (fun c ->
+            b.Color <- StringValue(colorToHex c)
+            let themeColor, themeTint, themeShade = borderThemeAttrsOf c
+            themeColor |> Option.iter (fun v -> b.ThemeColor <- EnumValue v)
+            themeTint |> Option.iter (fun v -> b.ThemeTint <- StringValue v)
+            themeShade |> Option.iter (fun v -> b.ThemeShade <- StringValue v))
+
         b
 
     let borderSideOfTop (b: Wordprocessing.TopBorder) : BorderSide =
         { Style = borderLineStyleOfW b.Val.Value
           Width = b.Size |> Option.ofObj |> Option.map (fun v -> borderSideOfWidthEighths v.Value)
-          Color = b.Color |> Option.ofObj |> Option.map (fun v -> colorOfHex v.Value) }
+          Color =
+            colorOfBorderThemeAttrs
+                (b.Color |> Option.ofObj |> Option.map (fun v -> v.Value))
+                (b.ThemeColor |> Option.ofObj |> Option.map (fun v -> v.Value))
+                (b.ThemeTint |> Option.ofObj |> Option.map (fun v -> v.Value))
+                (b.ThemeShade |> Option.ofObj |> Option.map (fun v -> v.Value)) }
 
     let borderSideOfBottom (b: Wordprocessing.BottomBorder) : BorderSide =
         { Style = borderLineStyleOfW b.Val.Value
           Width = b.Size |> Option.ofObj |> Option.map (fun v -> borderSideOfWidthEighths v.Value)
-          Color = b.Color |> Option.ofObj |> Option.map (fun v -> colorOfHex v.Value) }
+          Color =
+            colorOfBorderThemeAttrs
+                (b.Color |> Option.ofObj |> Option.map (fun v -> v.Value))
+                (b.ThemeColor |> Option.ofObj |> Option.map (fun v -> v.Value))
+                (b.ThemeTint |> Option.ofObj |> Option.map (fun v -> v.Value))
+                (b.ThemeShade |> Option.ofObj |> Option.map (fun v -> v.Value)) }
 
     let borderSideOfLeft (b: Wordprocessing.LeftBorder) : BorderSide =
         { Style = borderLineStyleOfW b.Val.Value
           Width = b.Size |> Option.ofObj |> Option.map (fun v -> borderSideOfWidthEighths v.Value)
-          Color = b.Color |> Option.ofObj |> Option.map (fun v -> colorOfHex v.Value) }
+          Color =
+            colorOfBorderThemeAttrs
+                (b.Color |> Option.ofObj |> Option.map (fun v -> v.Value))
+                (b.ThemeColor |> Option.ofObj |> Option.map (fun v -> v.Value))
+                (b.ThemeTint |> Option.ofObj |> Option.map (fun v -> v.Value))
+                (b.ThemeShade |> Option.ofObj |> Option.map (fun v -> v.Value)) }
 
     let borderSideOfRight (b: Wordprocessing.RightBorder) : BorderSide =
         { Style = borderLineStyleOfW b.Val.Value
           Width = b.Size |> Option.ofObj |> Option.map (fun v -> borderSideOfWidthEighths v.Value)
-          Color = b.Color |> Option.ofObj |> Option.map (fun v -> colorOfHex v.Value) }
+          Color =
+            colorOfBorderThemeAttrs
+                (b.Color |> Option.ofObj |> Option.map (fun v -> v.Value))
+                (b.ThemeColor |> Option.ofObj |> Option.map (fun v -> v.Value))
+                (b.ThemeTint |> Option.ofObj |> Option.map (fun v -> v.Value))
+                (b.ThemeShade |> Option.ofObj |> Option.map (fun v -> v.Value)) }
 
     let borderSideOfInsideH (b: Wordprocessing.InsideHorizontalBorder) : BorderSide =
         { Style = borderLineStyleOfW b.Val.Value
           Width = b.Size |> Option.ofObj |> Option.map (fun v -> borderSideOfWidthEighths v.Value)
-          Color = b.Color |> Option.ofObj |> Option.map (fun v -> colorOfHex v.Value) }
+          Color =
+            colorOfBorderThemeAttrs
+                (b.Color |> Option.ofObj |> Option.map (fun v -> v.Value))
+                (b.ThemeColor |> Option.ofObj |> Option.map (fun v -> v.Value))
+                (b.ThemeTint |> Option.ofObj |> Option.map (fun v -> v.Value))
+                (b.ThemeShade |> Option.ofObj |> Option.map (fun v -> v.Value)) }
 
     let borderSideOfInsideV (b: Wordprocessing.InsideVerticalBorder) : BorderSide =
         { Style = borderLineStyleOfW b.Val.Value
           Width = b.Size |> Option.ofObj |> Option.map (fun v -> borderSideOfWidthEighths v.Value)
-          Color = b.Color |> Option.ofObj |> Option.map (fun v -> colorOfHex v.Value) }
+          Color =
+            colorOfBorderThemeAttrs
+                (b.Color |> Option.ofObj |> Option.map (fun v -> v.Value))
+                (b.ThemeColor |> Option.ofObj |> Option.map (fun v -> v.Value))
+                (b.ThemeTint |> Option.ofObj |> Option.map (fun v -> v.Value))
+                (b.ThemeShade |> Option.ofObj |> Option.map (fun v -> v.Value)) }
 
     let paragraphBordersToW (b: BorderStyle) : Wordprocessing.ParagraphBorders =
         let pBdr = Wordprocessing.ParagraphBorders()
@@ -819,6 +925,8 @@ module StyleRegistry =
               Wordprocessing.TableStyleOverrideValues.LastColumn, d.LastColumn
               Wordprocessing.TableStyleOverrideValues.Band1Horizontal, d.BandedRow
               Wordprocessing.TableStyleOverrideValues.Band1Vertical, d.BandedColumn
+              Wordprocessing.TableStyleOverrideValues.Band2Horizontal, d.BandedRow2
+              Wordprocessing.TableStyleOverrideValues.Band2Vertical, d.BandedColumn2
               Wordprocessing.TableStyleOverrideValues.NorthEastCell, d.NorthEastCell
               Wordprocessing.TableStyleOverrideValues.NorthWestCell, d.NorthWestCell
               Wordprocessing.TableStyleOverrideValues.SouthEastCell, d.SouthEastCell
@@ -857,6 +965,8 @@ module StyleRegistry =
                   LastColumn = regionOf Wordprocessing.TableStyleOverrideValues.LastColumn
                   BandedRow = regionOf Wordprocessing.TableStyleOverrideValues.Band1Horizontal
                   BandedColumn = regionOf Wordprocessing.TableStyleOverrideValues.Band1Vertical
+                  BandedRow2 = regionOf Wordprocessing.TableStyleOverrideValues.Band2Horizontal
+                  BandedColumn2 = regionOf Wordprocessing.TableStyleOverrideValues.Band2Vertical
                   NorthEastCell = regionOf Wordprocessing.TableStyleOverrideValues.NorthEastCell
                   NorthWestCell = regionOf Wordprocessing.TableStyleOverrideValues.NorthWestCell
                   SouthEastCell = regionOf Wordprocessing.TableStyleOverrideValues.SouthEastCell
