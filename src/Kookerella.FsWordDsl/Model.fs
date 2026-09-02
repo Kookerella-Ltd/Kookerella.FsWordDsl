@@ -95,6 +95,13 @@ module Model =
         /// (formatting-change history, moves, and table row/cell tracking are documented
         /// gaps, not covered by this case).
         | TrackedChange of revision: Revision * content: Inline list
+        /// A structured document tag (`w:sdt`) sitting inside a single paragraph, wrapping
+        /// its own currently-displayed content the same "content is ordinary caller-
+        /// authored `Inline`s" way `Field`'s `cachedResult` does. See `ContentControls.fs`'s
+        /// own doc comment for what `ContentControlProps.Type` models and doesn't. The
+        /// block-level counterpart (a content control wrapping whole paragraphs/tables
+        /// instead) is `Block.ContentControlBlock`.
+        | InlineContentControl of props: ContentControlProps * content: Inline list
 
     /// One paragraph's content plus its formatting. `StyleId` references a named style
     /// (`Document.Styles`, e.g. `"Heading1"`) - the inheritance layer; `Format` is direct/
@@ -123,6 +130,13 @@ module Model =
     and Block =
         | ParagraphBlock of Paragraph
         | TableBlock of TableEntry
+        /// The block-level counterpart to `Inline.InlineContentControl` - a content
+        /// control wrapping whole paragraphs/tables rather than sitting inside one
+        /// paragraph. Only `RichTextControl`/`PlainTextControl` occur here in real Word
+        /// files in practice (a dropdown/date/checkbox's own displayed value is inherently
+        /// a single run) - nothing enforces that, `Writer` just writes whatever `content` a
+        /// caller gives the same way rich text does.
+        | ContentControlBlock of props: ContentControlProps * content: Block list
 
     /// One table cell. `Content` is almost always a single `ParagraphBlock` in practice
     /// (Word requires at least one paragraph per cell even when it's empty), but nothing

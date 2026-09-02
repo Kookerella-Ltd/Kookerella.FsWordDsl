@@ -153,6 +153,66 @@ module Reader =
         let text = meta |> Option.map (fun c -> c.InnerText) |> Option.defaultValue ""
         author, initials, date, text
 
+    let private listItemsOfW (items: Wordprocessing.ListItem seq) : (string * string) list =
+        items
+        |> Seq.map (fun li ->
+            (li.DisplayText |> opt |> Option.map (fun v -> v.Value) |> Option.defaultValue ""), (li.Value |> opt |> Option.map (fun v -> v.Value) |> Option.defaultValue ""))
+        |> List.ofSeq
+
+    /// The inverse of `Writer.contentControlPropsToW` - absence of any recognized type
+    /// marker child (`w:text`/`w:dropDownList`/`w:comboBox`/`w:date`/`w14:checkbox`) reads
+    /// as `RichTextControl`, real Word's own convention for what an unmarked `w:sdtPr`
+    /// means. `sdtPr.GetFirstChild<T>()` (not a named property) for the same reason
+    /// `Writer`'s own note on `SdtProperties` explains.
+    let private contentControlTypeOfW (sdtPr: Wordprocessing.SdtProperties) : ContentControlType =
+        let text =
+            sdtPr.GetFirstChild<Wordprocessing.SdtContentText>()
+            |> opt
+            |> Option.map (fun t -> PlainTextControl(t.MultiLine |> opt |> Option.map (fun v -> v.Value) |> Option.defaultValue false))
+
+        let dropdown =
+            sdtPr.GetFirstChild<Wordprocessing.SdtContentDropDownList>()
+            |> opt
+            |> Option.map (fun ddl -> DropDownControl(listItemsOfW (ddl.Elements<Wordprocessing.ListItem>()), false))
+
+        let combo =
+            sdtPr.GetFirstChild<Wordprocessing.SdtContentComboBox>()
+            |> opt
+            |> Option.map (fun cb -> DropDownControl(listItemsOfW (cb.Elements<Wordprocessing.ListItem>()), true))
+
+        let date =
+            sdtPr.GetFirstChild<Wordprocessing.SdtContentDate>()
+            |> opt
+            |> Option.map (fun d ->
+                let fullDate = d.FullDate |> opt |> Option.map (fun v -> v.Value)
+                let format = d.DateFormat |> opt |> Option.bind (fun df -> df.Val |> opt) |> Option.map (fun v -> v.Value)
+                DateControl(fullDate, format))
+
+        // `Office2010.Word.SdtContentCheckBox`/`.Checked` - a DIFFERENT `OnOffValues` enum
+        // from `Wordprocessing.OnOffValues`, see `Writer.contentControlPropsToW`'s own note.
+        let checkbox =
+            sdtPr.GetFirstChild<Office2010.Word.SdtContentCheckBox>()
+            |> opt
+            |> Option.map (fun cb ->
+                let isChecked =
+                    cb.Checked
+                    |> opt
+                    |> Option.bind (fun c -> c.Val |> opt)
+                    |> Option.map (fun v -> v.Value = Office2010.Word.OnOffValues.One || v.Value = Office2010.Word.OnOffValues.True)
+                    |> Option.defaultValue false
+
+                CheckBoxControl isChecked)
+
+        [ text; dropdown; combo; date; checkbox ] |> List.tryPick id |> Option.defaultValue RichTextControl
+
+    let private contentControlPropsOfW (sdtPr: Wordprocessing.SdtProperties option) : ContentControlProps =
+        match sdtPr with
+        | None -> { Alias = None; Tag = None; Type = RichTextControl }
+        | Some pr ->
+            { Alias = pr.GetFirstChild<Wordprocessing.SdtAlias>() |> opt |> Option.bind (fun a -> a.Val |> opt) |> Option.map (fun v -> v.Value)
+              Tag = pr.GetFirstChild<Wordprocessing.Tag>() |> opt |> Option.bind (fun t -> t.Val |> opt) |> Option.map (fun v -> v.Value)
+              Type = contentControlTypeOfW pr }
+
     let rec private parseInlineRange
         (elements: OpenXmlElement[])
         (startIdx: int)
@@ -277,6 +337,18 @@ module Reader =
                 let revision = { Kind = Deleted; Author = del.Author.Value; Date = del.Date |> opt |> Option.map (fun v -> v.Value) }
                 result.Add(TrackedChange(revision, content))
                 i <- i + 1
+            | :? Wordprocessing.SdtRun as sdt ->
+                let props = contentControlPropsOfW (sdt.SdtProperties |> opt)
+
+                let content =
+                    match sdt.SdtContentRun |> opt with
+                    | Some c ->
+                        let children = c.ChildElements |> Seq.cast<OpenXmlElement> |> Array.ofSeq
+                        parseInlineRange children 0 children.Length mainPart rctx
+                    | None -> []
+
+                result.Add(InlineContentControl(props, content))
+                i <- i + 1
             | :? Wordprocessing.Run as r ->
                 let footnoteRef = r.Elements<Wordprocessing.FootnoteReference>() |> Seq.tryHead
                 let endnoteRef = r.Elements<Wordprocessing.EndnoteReference>() |> Seq.tryHead
@@ -372,23 +444,26 @@ module Reader =
               InsideVertical = tb.InsideVerticalBorder |> opt |> Option.map borderSideOfInsideV })
 
     /// Zero-or-more, not exactly one: an unrecognized body/cell-level element is dropped
-    /// (`[]`) rather than failing the whole document, and a content control/custom XML
-    /// wrapper expands to whatever recognized content it wraps. Reading an arbitrary
-    /// real-world `.docx` is meant to be best-effort (see this module's own doc comment) -
-    /// this used to be a lie for anything at block level it didn't recognize, throwing
-    /// instead of degrading, which a `w:sdt` (a content control - extremely common in
-    /// real-world templates: form fields, dropdowns, date pickers) hit constantly.
+    /// (`[]`) rather than failing the whole document, and a custom XML wrapper expands to
+    /// whatever recognized content it wraps. Reading an arbitrary real-world `.docx` is
+    /// meant to be best-effort (see this module's own doc comment) - this used to be a lie
+    /// for anything at block level it didn't recognize, throwing instead of degrading,
+    /// which a `w:sdt` (a content control - extremely common in real-world templates: form
+    /// fields, dropdowns, date pickers) hit constantly. `w:sdt` itself is now modeled (see
+    /// `ContentControls.fs`) rather than just unwrapped and discarded.
     let rec private readBlock (mainPart: MainDocumentPart) (rctx: ReadCtx) (el: OpenXmlElement) : Block list =
         match el with
         | :? Wordprocessing.Paragraph as p -> [ ParagraphBlock(readParagraph mainPart rctx p) ]
         | :? Wordprocessing.Table as t -> [ TableBlock(readTable mainPart rctx t) ]
         | :? Wordprocessing.SdtBlock as sdt ->
-            // This DSL doesn't model content controls themselves (see MAPPING.md) - only
-            // the block content they wrap is recovered, the control wrapper itself
-            // (tag/title/lock/placeholder/data binding, ...) is silently discarded.
-            match sdt.SdtContentBlock |> opt with
-            | Some content -> content.ChildElements |> Seq.collect (readBlock mainPart rctx) |> List.ofSeq
-            | None -> []
+            let props = contentControlPropsOfW (sdt.SdtProperties |> opt)
+
+            let content =
+                match sdt.SdtContentBlock |> opt with
+                | Some c -> c.ChildElements |> Seq.collect (readBlock mainPart rctx) |> List.ofSeq
+                | None -> []
+
+            [ ContentControlBlock(props, content) ]
         | :? Wordprocessing.CustomXmlBlock as cx -> cx.ChildElements |> Seq.collect (readBlock mainPart rctx) |> List.ofSeq
         | _ ->
             // Anything else unmodeled at block level (`w:altChunk` - an embedded foreign

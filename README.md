@@ -51,6 +51,9 @@ reasoning and what adding either would look like.
   - `Revisions.fs` - `RevisionKind`/`Revision` for track changes (`Inline.TrackedChange`,
     `Paragraph.MarkRevision`) - narrowly scoped to inserted/deleted content and paragraph
     marks, see `MAPPING.md` for what isn't covered.
+  - `ContentControls.fs` - `ContentControlType`/`ContentControlProps` for content controls
+    (structured document tags, `w:sdt`): plain text, rich text, dropdown/combo box, date
+    picker, checkbox - see `MAPPING.md` for what isn't covered.
   - `PageSetup.fs` - `PageOrientation`, `PageSize`, `PageMargins`, `SectionBreakType`,
     `NoteNumberRestart`/`NoteNumberingSettings` (a section's own footnote/endnote
     numbering).
@@ -66,8 +69,10 @@ reasoning and what adding either would look like.
   - `Model.fs` - the recursive content model: `Inline` (runs, breaks, images, hyperlinks,
     bookmarks and comments - both the single-paragraph `Bookmark`/`Comment` cases and the
     cross-paragraph `BookmarkRangeStart`/`End`/`CommentRangeStart`/`End` markers, simple
-    fields, footnotes/endnotes, and `TrackedChange` for track changes), `Paragraph`
-    (including `MarkRevision`), `Block` (paragraph or table), `TableCell`/
+    fields, footnotes/endnotes, `TrackedChange` for track changes, and
+    `InlineContentControl` for content controls), `Paragraph` (including `MarkRevision`),
+    `Block` (paragraph, table, or `ContentControlBlock` - the block-level counterpart to
+    `InlineContentControl`), `TableCell`/
     `TableRow` (including `RepeatAsHeader`)/`TableEntry` (including `CellMargins`),
     `HeaderFooterSet`,
     `SectionProperties` (including `BreakType` and `FootnoteNumbering`/
@@ -85,10 +90,11 @@ reasoning and what adding either would look like.
     `withNumbering`, `withProtection`, `withVbaProject`, `withDocumentProperties`,
     `withTableStyles`, `bulletListDef`, `numberedListDef`, `multiLevelNumberedListDef`)
     plus `DocumentDsl` - smart constructors (`run`, `para` (with `markRevision`),
-    `hyperlink`, `bookmark`, `comment`, `inserted`/`deleted` (track changes), `image`,
-    `footnote`, `endnote`, `tableCell`, `tableRow` (with `height`/`repeatAsHeader`),
-    `table` (with `style`/`borders`/`cellMargins`)) with real optional parameters, the
-    Word analog of the Excel repo's `SheetDsl`.
+    `hyperlink`, `bookmark`, `comment`, `inserted`/`deleted` (track changes),
+    `contentControl`/`contentControlBlock` (content controls), `image`, `footnote`,
+    `endnote`, `tableCell`, `tableRow` (with `height`/`repeatAsHeader`), `table` (with
+    `style`/`borders`/`cellMargins`)) with real optional parameters, the Word analog of
+    the Excel repo's `SheetDsl`.
   - `Interpreter/StyleRegistry.fs` - shared run/paragraph/border/color conversions plus
     `Document.Styles` <-> `styles.xml` (internal).
   - `Interpreter/ImageWriter.fs` / `ImageReader.fs` - an inline image's own DSL <->
@@ -342,6 +348,23 @@ para
       run "dog." ]
 
 para ([ run "This whole paragraph was inserted." ], markRevision = { Kind = Inserted; Author = "Alex"; Date = None })
+```
+
+Content controls (`contentControl` for run-level, `contentControlBlock` for block-level)
+wrap their own currently-displayed content the same way, plus a `ContentControlType` (see
+[MAPPING.md](MAPPING.md) for the full set - plain text, rich text, dropdown/combo box, date
+picker, checkbox):
+
+```fsharp
+para
+    [ run "Client name: "
+      contentControl ([ run "Type here" ], PlainTextControl false, alias = "Client Name", tag = "clientName") ]
+
+para
+    [ run "Favorite color: "
+      contentControl ([ run "Blue" ], DropDownControl([ "Red", "red"; "Green", "green"; "Blue", "blue" ], false)) ]
+
+contentControlBlock([ para [ run "This whole paragraph is a rich-text content control." ] ], RichTextControl, alias = "Notes")
 ```
 
 Document-level protection, macros, and core properties are all pipe-friendly, same shape as

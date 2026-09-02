@@ -453,6 +453,37 @@ module Xml =
     let private markRevisionToXml (r: Revision) : XElement =
         XElement(xn "markRevision", attr "kind" (revisionKindToStr r.Kind), attr "author" r.Author, attrOpt "date" (r.Date |> Option.map (fun d -> d.ToString("o"))))
 
+    /// The type-marker child of a `contentControl`/`contentControlBlock` element - one of
+    /// `plainText`/`richText`/`dropDown`/`date`/`checkBox`, matching `ContentControlType`'s
+    /// own cases. Shared by both the inline and block-level content control elements.
+    let private contentControlTypeToXml (t: ContentControlType) : XElement =
+        match t with
+        | RichTextControl -> XElement(xn "richText")
+        | PlainTextControl multiLine -> XElement(xn "plainText", (if multiLine then [ attr "multiLine" true ] else []))
+        | DropDownControl(items, editable) ->
+            XElement(
+                xn "dropDown",
+                (if editable then [ attr "editable" true ] else []),
+                items |> List.map (fun (display, value) -> XElement(xn "item", attr "displayText" display, attr "value" value))
+            )
+        | DateControl(fullDate, format) ->
+            XElement(xn "date", attrOpt "fullDate" (fullDate |> Option.map (fun d -> d.ToString("o"))), attrOpt "format" format)
+        | CheckBoxControl checked_ -> XElement(xn "checkBox", attr "checked" checked_)
+
+    let private contentControlTypeOfXml (el: XElement) : ContentControlType =
+        match el.Name.LocalName with
+        | "plainText" -> PlainTextControl(boolAttr "multiLine" el)
+        | "dropDown" -> DropDownControl(el.Elements(xn "item") |> Seq.map (fun i -> i.Attribute(xn "displayText").Value, i.Attribute(xn "value").Value) |> List.ofSeq, boolAttr "editable" el)
+        | "date" -> DateControl(strAttr "fullDate" el |> Option.map DateTime.Parse, strAttr "format" el)
+        | "checkBox" -> CheckBoxControl(boolAttr "checked" el)
+        | _ -> RichTextControl
+
+    let private contentControlPropsOfXml (el: XElement) : ContentControlProps =
+        let typeEl = el.Elements() |> Seq.find (fun c -> c.Name.LocalName <> "content")
+        { Alias = strAttr "alias" el
+          Tag = strAttr "tag" el
+          Type = contentControlTypeOfXml typeEl }
+
     // `inlineToXml`/`inlineOfXml` need `blockToXml`/`blockOfXml` (a `Footnote`/`Endnote`'s
     // own body is a `Block list`), which need `paragraphToXml`/`paragraphOfXml`, which need
     // `inlineToXml`/`inlineOfXml` back for a paragraph's own `Inlines` - one `rec ... and
@@ -497,6 +528,14 @@ module Xml =
                 attrOpt "date" (revision.Date |> Option.map (fun d -> d.ToString("o"))),
                 content |> List.map inlineToXml
             )
+        | InlineContentControl(props, content) ->
+            XElement(
+                xn "contentControl",
+                attrOpt "alias" props.Alias,
+                attrOpt "tag" props.Tag,
+                contentControlTypeToXml props.Type,
+                XElement(xn "content", content |> List.map inlineToXml)
+            )
         | Field(instr, cached) -> XElement(xn "field", attr "instruction" instr, attrOpt "cachedResult" cached)
         | Footnote content -> XElement(xn "footnote", XElement(xn "body", content |> List.map blockToXml))
         | Endnote content -> XElement(xn "endnote", XElement(xn "body", content |> List.map blockToXml))
@@ -524,6 +563,7 @@ module Xml =
             CommentRangeStart(el.Attribute(xn "id").Value, el.Attribute(xn "author").Value, strAttr "initials" el, strAttr "date" el |> Option.map DateTime.Parse, text)
         | "commentRangeEnd" -> CommentRangeEnd(el.Attribute(xn "id").Value)
         | "trackedChange" -> TrackedChange(revisionOfXml el, el.Elements() |> Seq.map inlineOfXml |> List.ofSeq)
+        | "contentControl" -> InlineContentControl(contentControlPropsOfXml el, el.Element(xn "content").Elements() |> Seq.map inlineOfXml |> List.ofSeq)
         | "field" -> Field(el.Attribute(xn "instruction").Value, strAttr "cachedResult" el)
         | "footnote" -> Footnote(el.Element(xn "body").Elements() |> Seq.map blockOfXml |> List.ofSeq)
         | "endnote" -> Endnote(el.Element(xn "body").Elements() |> Seq.map blockOfXml |> List.ofSeq)
@@ -556,11 +596,20 @@ module Xml =
         match b with
         | ParagraphBlock p -> paragraphToXml p
         | TableBlock t -> tableToXml t
+        | ContentControlBlock(props, content) ->
+            XElement(
+                xn "contentControlBlock",
+                attrOpt "alias" props.Alias,
+                attrOpt "tag" props.Tag,
+                contentControlTypeToXml props.Type,
+                XElement(xn "content", content |> List.map blockToXml)
+            )
 
     and private blockOfXml (el: XElement) : Block =
         match el.Name.LocalName with
         | "para" -> ParagraphBlock(paragraphOfXml el)
         | "table" -> TableBlock(tableOfXml el)
+        | "contentControlBlock" -> ContentControlBlock(contentControlPropsOfXml el, el.Element(xn "content").Elements() |> Seq.map blockOfXml |> List.ofSeq)
         | other -> failwithf "Unknown block element: %s" other
 
     and private tableCellToXml (c: TableCell) : XElement =

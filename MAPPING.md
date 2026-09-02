@@ -16,12 +16,13 @@ contains something unmodeled:
 - Inside a paragraph, an unrecognized inline-level element (e.g. track-changes `w:ins`/
   `w:del` wrapping a run) is silently skipped - the surrounding recognized content still
   reads back fine, but that specific unmodeled content doesn't survive the read.
-- At the document/cell body level, a content control (`w:sdt`) or `w:customXml` wrapper is
-  unwrapped rather than skipped - the paragraphs/tables it wraps are read normally, only
-  the wrapper itself (and whatever metadata it carried) is discarded. Anything else
-  unrecognized there (`w:altChunk`, a bookmark/comment range marker placed directly in the
-  body rather than nested in a paragraph, `w:permStart`/`permEnd`, ...) is dropped the same
-  way the inline case is.
+- At the document/cell body level, a content control (`w:sdt`) is modeled, not just
+  unwrapped - see "Content controls" under "Modeled faithfully" below. A `w:customXml`
+  wrapper is still unwrapped rather than skipped: the paragraphs/tables it wraps are read
+  normally, only the wrapper itself (and whatever metadata it carried) is discarded.
+  Anything else unrecognized there (`w:altChunk`, a bookmark/comment range marker placed
+  directly in the body rather than nested in a paragraph, `w:permStart`/`permEnd`, ...) is
+  dropped the same way the inline case is.
 - `tests/Kookerella.FsWordDsl.Tests/Tests.fs`'s own `Reader tolerates unmodeled body-level
   content instead of throwing` test builds a file directly against the OOXML SDK
   (bypassing `Writer` entirely, since there's no DSL-level way to author these constructs)
@@ -158,6 +159,23 @@ contains something unmodeled:
   (`docProps/app.xml`, via `ExtendedFilePropertiesPart`) - only written/read when at least
   one is set (`DocumentProperties.Default` round-trips to nothing on disk, same "all-defaults
   reads back as absent" discipline the rest of this DSL follows).
+- **Content controls** (structured document tags, `w:sdt`): five of Word's control kinds -
+  the ones actually common in real-world templates - via `Inline.InlineContentControl`
+  (run-level, inside a paragraph) and `Block.ContentControlBlock` (block-level, wrapping
+  whole paragraphs/tables), both carrying a shared `ContentControlProps` (`Alias`/`Tag` -
+  `w:alias`/`w:tag` - plus a `ContentControlType`). See `ContentControls.fs`'s own doc
+  comment for the exact shape of each: plain text (single- or multi-line), rich text (the
+  default when no type marker is present), dropdown list and combo box (identical
+  `(displayText, value) list` shape, differing only in whether free typing is allowed),
+  date picker (`fullDate`/`format` metadata, alongside the control's own displayed text in
+  `content`), and checkbox (checked/unchecked only - reached via a different SDK
+  namespace, `Office2010.Word.SdtContentCheckBox`/`w14:checkbox` on the wire, than every
+  other control kind here). A control's own currently-displayed content (typed text, the
+  selected dropdown/date value, ...) is ordinary caller-authored `Inline`/`Block` content
+  in `content` - the same "this DSL never evaluates anything, it just carries what's
+  there" posture `Inline.Field`'s `cachedResult` takes. See the gap below on what isn't
+  covered: picture/group/repeating-section/citation/bibliography controls, XML data
+  binding, placeholder text, custom checked/unchecked glyphs, and editing locks.
 - **Track changes** (`w:ins`/`w:del`), narrowly scoped to the case that actually matters for
   almost every real redlined document: `Inline.TrackedChange` wraps arbitrary inline content
   the same way `Bookmark`/`Comment` do, marking it inserted or deleted with an author and a
@@ -178,13 +196,21 @@ contains something unmodeled:
   just not the special annotation), and table row/cell-level insertion/deletion tracking
   (`w:trPr/w:ins`, `w:tcPr/w:cellIns`) aren't modeled - see "Modeled faithfully" above for
   what is.
-- **Content controls (structured document tags), and `w:customXml` wrappers.** This DSL
-  doesn't model the control itself (tag/title/lock/placeholder/data binding, dropdown/
-  date/checkbox/... variants) - none of that is authored, and none of it survives a
-  round trip. `Reader` does still recover the block/inline content a `w:sdt`/`w:customXml`
-  *wraps* when reading a foreign file (unwrapping it rather than failing the whole
-  document, since these are extremely common in real-world templates - see the note below
-  on `Reader`'s own resilience posture).
+- **Content controls beyond the five kinds "Modeled faithfully" above.** Picture controls,
+  group/repeating-section controls (structural, rare in hand-authored documents),
+  citation/bibliography controls, and XML data binding (`w:dataBinding` - binds a
+  control's value to an external XML part) aren't modeled at all. Placeholder text
+  (`w:placeholder`/`w:showingPlcHdr`) isn't either - real Word references a *separate*
+  "glossary document" part by name for the placeholder's own text rather than carrying it
+  inline, which is a real extra part-authoring concern this DSL doesn't take on; a
+  control's `content` still carries whatever is actually typed in, so this only matters
+  for an empty, never-filled-in control. Editing locks (`w:lock` - whether a control/its
+  content can be deleted or edited) and checkbox custom checked/unchecked glyphs
+  (`w14:checkedState`/`w14:uncheckedState` - a non-default symbol font character instead
+  of Word's plain checkmark/empty box) aren't modeled either. `w:customXml` wrappers are
+  still unwrapped rather than modeled (see the note above on `Reader`'s own resilience
+  posture) - unlike `w:sdt`, nothing here represents the wrapper itself, only recovers the
+  content inside it.
 - **Real field computation.** Only raw instruction text + a cached display value round-trip
   (see "Modeled faithfully" above) - a table of contents, cross-reference, or any other
   field that depends on document layout is never actually computed by this DSL, unlike
@@ -223,8 +249,9 @@ contains something unmodeled:
 Nothing is currently in this bucket in the sense Excel's own `MAPPING.md` uses it (every
 SpreadsheetML feature Excel originally scoped out has since been implemented) - this repo
 is a first pass (F# core only; no C# wrapper or MCP server yet, see `CLAUDE.md`), so
-several of the "Known gaps" above (track changes, content controls, text boxes) are
-realistic candidates for a genuine future extension rather than permanently excluded.
+several of the "Known gaps" above (text boxes, real field computation, digital
+signatures) are realistic candidates for a genuine future extension rather than
+permanently excluded.
 
 ## A note on formatting
 

@@ -272,6 +272,47 @@ module Writer =
 
         idStr
 
+    /// Builds a `w:sdtPr` for one `ContentControlProps` - `SdtProperties` itself exposes no
+    /// named child properties in the SDK (confirmed by reflection, unlike almost every
+    /// other composite element this DSL constructs), so its children are appended
+    /// positionally like `w:tblGrid`'s columns rather than assigned. `CheckBoxControl` is
+    /// the one case that reaches outside `Wordprocessing` - `Office2010.Word.
+    /// SdtContentCheckBox`/`.Checked` on the wire (`w14:checkbox`/`w14:checked`), a
+    /// DIFFERENT `OnOffValues` enum from `Wordprocessing.OnOffValues` (confirmed by
+    /// reflection - `Checked.Val : EnumValue<Office2010.Word.OnOffValues>`), so it must be
+    /// qualified explicitly rather than via the ambient `Wordprocessing.OnOffValues` this
+    /// file uses everywhere else.
+    let private contentControlPropsToW (props: ContentControlProps) : Wordprocessing.SdtProperties =
+        let sdtPr = Wordprocessing.SdtProperties()
+        props.Alias |> Option.iter (fun a -> sdtPr.AppendChild(Wordprocessing.SdtAlias(Val = StringValue a)) |> ignore)
+        props.Tag |> Option.iter (fun t -> sdtPr.AppendChild(Wordprocessing.Tag(Val = StringValue t)) |> ignore)
+
+        match props.Type with
+        | RichTextControl -> ()
+        | PlainTextControl multiLine ->
+            let t = Wordprocessing.SdtContentText()
+            if multiLine then t.MultiLine <- OnOffValue true
+            sdtPr.AppendChild(t) |> ignore
+        | DropDownControl(items, editable) ->
+            let listItems = items |> List.map (fun (display, value) -> Wordprocessing.ListItem(DisplayText = StringValue display, Value = StringValue value) :> OpenXmlElement)
+
+            if editable then
+                sdtPr.AppendChild(Wordprocessing.SdtContentComboBox(listItems)) |> ignore
+            else
+                sdtPr.AppendChild(Wordprocessing.SdtContentDropDownList(listItems)) |> ignore
+        | DateControl(fullDate, format) ->
+            let d = Wordprocessing.SdtContentDate()
+            fullDate |> Option.iter (fun dt -> d.FullDate <- DateTimeValue dt)
+            format |> Option.iter (fun f -> d.DateFormat <- Wordprocessing.DateFormat(Val = StringValue f))
+            sdtPr.AppendChild(d) |> ignore
+        | CheckBoxControl checked_ ->
+            let cb = Office2010.Word.SdtContentCheckBox()
+            let onOff = if checked_ then Office2010.Word.OnOffValues.One else Office2010.Word.OnOffValues.Zero
+            cb.Checked <- Office2010.Word.Checked(Val = EnumValue onOff)
+            sdtPr.AppendChild(cb) |> ignore
+
+        sdtPr
+
     let rec private inlineToElements (ctx: Ctx) (inl: Inline) : OpenXmlElement list =
         match inl with
         | Run(text, style, styleId) -> [ textRun ctx text style styleId :> OpenXmlElement ]
@@ -352,6 +393,13 @@ module Writer =
                 ctx.InsideDeletion <- wasInsideDeletion
                 contentEls |> List.iter (wrapper.AppendChild >> ignore)
                 [ wrapper :> OpenXmlElement ]
+        | InlineContentControl(props, content) ->
+            let sdt = Wordprocessing.SdtRun()
+            sdt.SdtProperties <- contentControlPropsToW props
+            let sdtContent = Wordprocessing.SdtContentRun()
+            content |> List.collect (inlineToElements ctx) |> List.iter (sdtContent.AppendChild >> ignore)
+            sdt.SdtContentRun <- sdtContent
+            [ sdt :> OpenXmlElement ]
         | Field(instruction, cachedResult) ->
             let sf = Wordprocessing.SimpleField(Instruction = StringValue instruction)
             cachedResult |> Option.iter (fun c -> sf.AppendChild(runWith (Wordprocessing.Text(c))) |> ignore)
@@ -408,6 +456,13 @@ module Writer =
         match block with
         | ParagraphBlock p -> paragraphToW ctx p :> OpenXmlElement
         | TableBlock t -> tableEntryToW ctx t :> OpenXmlElement
+        | ContentControlBlock(props, content) ->
+            let sdt = Wordprocessing.SdtBlock()
+            sdt.SdtProperties <- contentControlPropsToW props
+            let sdtContent = Wordprocessing.SdtContentBlock()
+            content |> List.iter (fun b -> sdtContent.AppendChild(blockToW ctx b) |> ignore)
+            sdt.SdtContentBlock <- sdtContent
+            sdt :> OpenXmlElement
 
     and private tableCellToW (ctx: Ctx) (colWidthTwips: int) (cell: TableCell) : Wordprocessing.TableCell =
         let tc = Wordprocessing.TableCell()

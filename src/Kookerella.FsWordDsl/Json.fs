@@ -469,6 +469,57 @@ module Json =
     let private markRevisionToJson (r: Revision) : JsonNode =
         obj_ [ "kind", Some(jstr (revisionKindToStr r.Kind)); "author", Some(jstr r.Author); "date", r.Date |> Option.map (fun d -> jstr (d.ToString("o"))) ] :> JsonNode
 
+    /// Same single-key-object-per-case convention this file uses throughout - shared by
+    /// `Inline.InlineContentControl` and `Block.ContentControlBlock` below, which differ
+    /// only in whether `content` holds `Inline`s or `Block`s.
+    let private contentControlTypeToJson (t: ContentControlType) : JsonNode =
+        match t with
+        | RichTextControl -> jstr "richText"
+        | PlainTextControl multiLine -> obj_ [ "plainText", Some(obj_ [ "multiLine", (if multiLine then Some(jbool true) else None) ] :> JsonNode) ] :> JsonNode
+        | DropDownControl(items, editable) ->
+            let itemsJson = items |> List.map (fun (display, value) -> obj_ [ "displayText", Some(jstr display); "value", Some(jstr value) ] :> JsonNode)
+
+            obj_
+                [ "dropDown",
+                  Some(obj_ [ "editable", (if editable then Some(jbool true) else None); "items", Some(JsonArray(itemsJson |> Array.ofList) :> JsonNode) ] :> JsonNode) ]
+            :> JsonNode
+        | DateControl(fullDate, format) ->
+            obj_ [ "date", Some(obj_ [ "fullDate", fullDate |> Option.map (fun d -> jstr (d.ToString("o"))); "format", format |> Option.map jstr ] :> JsonNode) ] :> JsonNode
+        | CheckBoxControl checked_ -> obj_ [ "checkBox", Some(obj_ [ "checked", Some(jbool checked_) ] :> JsonNode) ] :> JsonNode
+
+    let private contentControlTypeOfJson (n: JsonNode) : ContentControlType =
+        match n with
+        | :? JsonValue as v when v.GetValue<string>() = "richText" -> RichTextControl
+        | _ ->
+            let o = n.AsObject()
+
+            if not (isNull o.["plainText"]) then
+                PlainTextControl(boolean "multiLine" (o.["plainText"].AsObject()))
+            elif not (isNull o.["dropDown"]) then
+                let d = o.["dropDown"].AsObject()
+                let items = arr "items" d |> List.map (fun n -> let io = n.AsObject() in (str "displayText" io |> Option.get, str "value" io |> Option.get))
+                DropDownControl(items, boolean "editable" d)
+            elif not (isNull o.["date"]) then
+                let d = o.["date"].AsObject()
+                DateControl(str "fullDate" d |> Option.map DateTime.Parse, str "format" d)
+            elif not (isNull o.["checkBox"]) then
+                CheckBoxControl(boolean "checked" (o.["checkBox"].AsObject()))
+            else
+                RichTextControl
+
+    let private contentControlPropsToJsonPairs (props: ContentControlProps) : (string * JsonNode option) list =
+        [ "alias", props.Alias |> Option.map jstr; "tag", props.Tag |> Option.map jstr; "type", Some(contentControlTypeToJson props.Type) ]
+
+    /// `contentControlTypeOfJson` (not `prop "type" o`) - the `type` value is a bare
+    /// string for `RichTextControl` but a single-key object for every other case (same
+    /// convention this whole file uses), and `JsonObject.AsObject()` throws on a bare
+    /// string, unlike the `prop`/`str` helpers above which each assume one shape or the
+    /// other.
+    let private contentControlPropsOfJson (o: JsonObject) : ContentControlProps =
+        { Alias = str "alias" o
+          Tag = str "tag" o
+          Type = (match o.["type"] with null -> RichTextControl | n -> contentControlTypeOfJson n) }
+
     // `Endnote`'s own body is a `Block list`), which need `paragraphToJson`/
     // `paragraphOfJson`, which need `inlineToJson`/`inlineOfJson` back for a paragraph's
     // own `Inlines` - one `rec ... and ...` chain, same cycle `Xml.fs`'s equivalent
@@ -535,6 +586,9 @@ module Json =
                       :> JsonNode
                   ) ]
             :> JsonNode
+        | InlineContentControl(props, content) ->
+            obj_ [ "contentControl", Some(obj_ (contentControlPropsToJsonPairs props @ [ "content", Some(JsonArray(content |> List.map inlineToJson |> Array.ofList) :> JsonNode) ]) :> JsonNode) ]
+            :> JsonNode
         | Field(instr, cached) ->
             obj_ [ "field", Some(obj_ [ "instruction", Some(jstr instr); "cachedResult", cached |> Option.map jstr ] :> JsonNode) ] :> JsonNode
         | Footnote content -> obj_ [ "footnote", Some(JsonArray(content |> List.map blockToJson |> Array.ofList) :> JsonNode) ] :> JsonNode
@@ -578,6 +632,9 @@ module Json =
             elif not (isNull o.["trackedChange"]) then
                 let t = o.["trackedChange"].AsObject()
                 TrackedChange(revisionOfJson t, arr "content" t |> List.map inlineOfJson)
+            elif not (isNull o.["contentControl"]) then
+                let c = o.["contentControl"].AsObject()
+                InlineContentControl(contentControlPropsOfJson c, arr "content" c |> List.map inlineOfJson)
             elif not (isNull o.["field"]) then
                 let f = o.["field"].AsObject()
                 Field(str "instruction" f |> Option.get, str "cachedResult" f)
@@ -611,14 +668,22 @@ module Json =
         match b with
         | ParagraphBlock p -> obj_ [ "para", Some(paragraphToJson p) ] :> JsonNode
         | TableBlock t -> obj_ [ "table", Some(tableToJson t) ] :> JsonNode
+        | ContentControlBlock(props, content) ->
+            obj_
+                [ "contentControlBlock",
+                  Some(obj_ (contentControlPropsToJsonPairs props @ [ "content", Some(JsonArray(content |> List.map blockToJson |> Array.ofList) :> JsonNode) ]) :> JsonNode) ]
+            :> JsonNode
 
     and private blockOfJson (n: JsonNode) : Block =
         let o = n.AsObject()
 
         if not (isNull o.["para"]) then
             ParagraphBlock(paragraphOfJson (o.["para"].AsObject()))
-        else
+        elif not (isNull o.["table"]) then
             TableBlock(tableOfJson (o.["table"].AsObject()))
+        else
+            let c = o.["contentControlBlock"].AsObject()
+            ContentControlBlock(contentControlPropsOfJson c, arr "content" c |> List.map blockOfJson)
 
     and private tableCellToJson (c: TableCell) : JsonNode =
         obj_ [ "props", Some(tableCellPropsToJson c.Props); "content", Some(JsonArray(c.Content |> List.map blockToJson |> Array.ofList)) ] :> JsonNode

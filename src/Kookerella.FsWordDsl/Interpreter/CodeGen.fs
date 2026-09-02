@@ -159,6 +159,19 @@ module CodeGen =
     let private renderRevision (r: Revision) : string =
         sprintf "{ Kind = %A; Author = %s; Date = %s }" r.Kind (quote r.Author) (renderOption (fun (d: System.DateTime) -> sprintf "System.DateTime.Parse(%s)" (quote (d.ToString("o")))) r.Date)
 
+    let private renderDate (d: System.DateTime) : string = sprintf "System.DateTime.Parse(%s)" (quote (d.ToString("o")))
+
+    let private renderContentControlType (t: ContentControlType) : string =
+        match t with
+        | RichTextControl -> "RichTextControl"
+        | PlainTextControl multiLine -> sprintf "PlainTextControl(%b)" multiLine
+        | DropDownControl(items, editable) -> sprintf "DropDownControl(%s, %b)" (renderList (renderTuple2 quote quote) items) editable
+        | DateControl(fullDate, format) -> sprintf "DateControl(%s, %s)" (renderOption renderDate fullDate) (renderOption quote format)
+        | CheckBoxControl checked_ -> sprintf "CheckBoxControl(%b)" checked_
+
+    let private renderContentControlProps (p: ContentControlProps) : string =
+        sprintf "{ Alias = %s; Tag = %s; Type = %s }" (renderOption quote p.Alias) (renderOption quote p.Tag) (renderContentControlType p.Type)
+
     let rec private renderInline (i: Inline) : string =
         match i with
         | Run(text, style, styleId) -> sprintf "Run(%s, %s, %s)" (quote text) (renderOption renderRunStyle style) (renderOption quote styleId)
@@ -179,6 +192,7 @@ module CodeGen =
             sprintf "CommentRangeStart(%s, %s, %s, %s, %s)" (quote id) (quote author) (renderOption quote initials) dateStr (quote text)
         | CommentRangeEnd id -> sprintf "CommentRangeEnd(%s)" (quote id)
         | TrackedChange(revision, content) -> sprintf "TrackedChange(%s, %s)" (renderRevision revision) (renderList renderInline content)
+        | InlineContentControl(props, content) -> sprintf "InlineContentControl(%s, %s)" (renderContentControlProps props) (renderList renderInline content)
         | Field(instr, cached) -> sprintf "Field(%s, %s)" (quote instr) (renderOption quote cached)
         | Footnote content -> sprintf "Footnote(%s)" (renderList renderBlock content)
         | Endnote content -> sprintf "Endnote(%s)" (renderList renderBlock content)
@@ -201,6 +215,7 @@ module CodeGen =
         match b with
         | ParagraphBlock p -> sprintf "ParagraphBlock(%s)" (renderParagraph p)
         | TableBlock t -> sprintf "TableBlock(%s)" (renderTableEntry t)
+        | ContentControlBlock(props, content) -> sprintf "ContentControlBlock(%s, %s)" (renderContentControlProps props) (renderList renderBlock content)
 
     and private renderTableCellProps (p: TableCellProps) : string =
         sprintf

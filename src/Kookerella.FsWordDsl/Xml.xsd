@@ -76,6 +76,7 @@
     <xs:choice minOccurs="0" maxOccurs="unbounded">
       <xs:element name="para" type="paraType" />
       <xs:element name="table" type="tableType" />
+      <xs:element name="contentControlBlock" type="contentControlBlockType" />
     </xs:choice>
   </xs:complexType>
 
@@ -149,6 +150,7 @@
         <xs:element name="commentRangeStart" type="commentRangeStartType" />
         <xs:element name="commentRangeEnd" type="commentRangeEndType" />
         <xs:element name="trackedChange" type="trackedChangeType" />
+        <xs:element name="contentControl" type="contentControlType" />
         <xs:element name="field" type="fieldType" />
         <xs:element name="footnote" type="noteType" />
         <xs:element name="endnote" type="noteType" />
@@ -175,6 +177,66 @@
         <xs:attribute name="date" type="xs:string" />
       </xs:extension>
     </xs:complexContent>
+  </xs:complexType>
+
+  <!-- Content controls (`w:sdt` - `Inline.InlineContentControl`/`Block.
+       ContentControlBlock`, see `ContentControls.fs`). Both the run-level and block-level
+       shapes carry the same type-marker choice plus `alias`/`tag` - they differ only in
+       whether `content` is `inlineContentType` or `bodyType`, mirroring the `Inline`/
+       `Block` split the DSL itself has. -->
+  <xs:complexType name="contentControlType">
+    <xs:sequence>
+      <xs:choice>
+        <xs:element name="plainText" type="plainTextControlType" />
+        <xs:element name="richText" type="emptyType" />
+        <xs:element name="dropDown" type="dropDownControlType" />
+        <xs:element name="date" type="dateControlType" />
+        <xs:element name="checkBox" type="checkBoxControlType" />
+      </xs:choice>
+      <xs:element name="content" type="inlineContentType" />
+    </xs:sequence>
+    <xs:attribute name="alias" type="xs:string" />
+    <xs:attribute name="tag" type="xs:string" />
+  </xs:complexType>
+
+  <xs:complexType name="contentControlBlockType">
+    <xs:sequence>
+      <xs:choice>
+        <xs:element name="plainText" type="plainTextControlType" />
+        <xs:element name="richText" type="emptyType" />
+        <xs:element name="dropDown" type="dropDownControlType" />
+        <xs:element name="date" type="dateControlType" />
+        <xs:element name="checkBox" type="checkBoxControlType" />
+      </xs:choice>
+      <xs:element name="content" type="bodyType" />
+    </xs:sequence>
+    <xs:attribute name="alias" type="xs:string" />
+    <xs:attribute name="tag" type="xs:string" />
+  </xs:complexType>
+
+  <xs:complexType name="plainTextControlType">
+    <xs:attribute name="multiLine" type="xs:boolean" />
+  </xs:complexType>
+
+  <xs:complexType name="dropDownControlType">
+    <xs:sequence>
+      <xs:element name="item" maxOccurs="unbounded">
+        <xs:complexType>
+          <xs:attribute name="displayText" type="xs:string" use="required" />
+          <xs:attribute name="value" type="xs:string" use="required" />
+        </xs:complexType>
+      </xs:element>
+    </xs:sequence>
+    <xs:attribute name="editable" type="xs:boolean" />
+  </xs:complexType>
+
+  <xs:complexType name="dateControlType">
+    <xs:attribute name="fullDate" type="xs:string" />
+    <xs:attribute name="format" type="xs:string" />
+  </xs:complexType>
+
+  <xs:complexType name="checkBoxControlType">
+    <xs:attribute name="checked" type="xs:boolean" use="required" />
   </xs:complexType>
 
   <!-- A cross-paragraph bookmark boundary marker (`Inline.BookmarkRangeStart`/`End`) -
@@ -419,6 +481,7 @@
       <xs:choice minOccurs="0" maxOccurs="unbounded">
         <xs:element name="para" type="paraType" />
         <xs:element name="table" type="tableType" />
+        <xs:element name="contentControlBlock" type="contentControlBlockType" />
       </xs:choice>
     </xs:sequence>
   </xs:complexType>

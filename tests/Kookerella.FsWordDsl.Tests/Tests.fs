@@ -63,6 +63,7 @@ let private normalizeCommentRangeIds (sections: Section list) : Section list =
                         t.Rows
                         |> List.map (fun r ->
                             { r with Cells = r.Cells |> List.map (fun c -> { c with Content = c.Content |> List.map normalizeBlock }) }) }
+        | ContentControlBlock(props, content) -> ContentControlBlock(props, content |> List.map normalizeBlock)
 
     let normalizeHeaderFooterSet (h: HeaderFooterSet) : HeaderFooterSet =
         { Default = h.Default |> Option.map (List.map normalizeBlock)
@@ -439,6 +440,39 @@ let ``TrackedChanges`` () =
     verifyScenarioNamed "TrackedChanges" "output.docx" doc
 
 [<Fact>]
+let ``ContentControls`` () =
+    let doc =
+        document
+            [ section
+                  [ para
+                        [ run "Client name: "
+                          contentControl ([ run "Type here" ], PlainTextControl false, alias = "Client Name", tag = "clientName")
+                          run "." ]
+                    para
+                        [ run "Favorite color: "
+                          contentControl ([ run "Blue" ], DropDownControl([ "Red", "red"; "Green", "green"; "Blue", "blue" ], false), alias = "Favorite Color") ]
+                    para
+                        [ run "Feedback: "
+                          contentControl ([ run "Other" ], DropDownControl([ "Yes", "yes"; "No", "no"; "Other", "other" ], true), tag = "feedbackChoice") ]
+                    para
+                        [ run "Meeting date: "
+                          contentControl (
+                              [ run "March 1, 2024" ],
+                              DateControl(Some(DateTime(2024, 3, 1)), Some "MMMM d, yyyy"),
+                              alias = "Meeting Date"
+                          ) ]
+                    para
+                        [ run "Agreed: "
+                          contentControl ([ run "☑" ], CheckBoxControl true, tag = "agreed") ]
+                    contentControlBlock(
+                        [ para [ run "This whole paragraph is a rich-text content control." ] ],
+                        RichTextControl,
+                        alias = "Notes"
+                    ) ] ]
+
+    verifyScenarioNamed "ContentControls" "output.docx" doc
+
+[<Fact>]
 let ``FootnotesAndEndnotes`` () =
     let props =
         { SectionProperties.Default with
@@ -656,12 +690,21 @@ let ``Reader tolerates unmodeled body-level content instead of throwing`` () =
 
     let doc = Document.load path
 
+    // `w:sdt` is now modeled as `ContentControlBlock` (see `ContentControls.fs`) rather
+    // than just unwrapped and discarded, so its own paragraph sits one level deeper than
+    // `s.Body` - recurse through it the same way a caller reading a real content-control-
+    // bearing template would.
+    let rec collectParagraphs (blocks: Block list) : Paragraph list =
+        blocks
+        |> List.collect (function
+            | ParagraphBlock p -> [ p ]
+            | ContentControlBlock(_, content) -> collectParagraphs content
+            | TableBlock _ -> [])
+
     let texts =
         doc.Sections
         |> List.collect (fun s -> s.Body)
-        |> List.choose (function
-            | ParagraphBlock p -> Some p
-            | _ -> None)
+        |> collectParagraphs
         |> List.collect (fun p -> p.Inlines)
         |> List.choose (function
             | Run(text, _, _) -> Some text
@@ -694,6 +737,7 @@ let ``Reader tolerates unmodeled body-level content instead of throwing`` () =
 [<InlineData("Comments")>]
 [<InlineData("Comments_MultiParagraph")>]
 [<InlineData("TrackedChanges")>]
+[<InlineData("ContentControls")>]
 [<InlineData("FootnotesAndEndnotes")>]
 [<InlineData("PageSetupLandscape")>]
 [<InlineData("HeaderFooterDefault")>]
