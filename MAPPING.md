@@ -74,8 +74,22 @@ inexact, lossy, or simply not implemented yet, so you know what to expect from a
   assigns the matching OOXML `w:id` automatically; `Reader` resolves a bare `w:bookmarkEnd`
   back to its name via a document-wide id->name pass built before per-paragraph reading).
 - **Comments**: modern Word comments (author, initials, date, text) anchored to a range of
-  inline content - scoped to within a single paragraph (see the gap below). Not the legacy
-  "cell comment" concept Excel models; this is what current Word's UI calls a comment.
+  inline content. Not the legacy "cell comment" concept Excel models; this is what current
+  Word's UI calls a comment. `Inline.Comment` wraps inline content within a single
+  paragraph, the common ergonomic case; a comment spanning more than one paragraph is
+  `CommentRangeStart`/`CommentRangeEnd` instead - two independent markers a caller places
+  directly in separate paragraphs' own `Inlines`, sharing an `id`. Unlike `Bookmark`'s
+  `name`, OOXML has nowhere to persist an arbitrary string alongside a comment range (only
+  a numeric `w:id`, which `Writer` assigns itself) - `CommentRangeStart`'s own `id` is
+  write-time-only, a correlation key for wiring the pair together when building the
+  document; `Reader` reconstructs some id from the real OOXML `w:id` instead, which
+  generally won't match what a caller originally wrote. Nothing else in a document ever
+  references a comment by this id the way `InternalBookmark` can reference a bookmark's
+  own `name`, so that's never a practical problem in use - it only means comparing a
+  `CommentRangeStart`/`End`'s own `id` field byte-for-byte across a round trip isn't
+  meaningful (`tests/Kookerella.FsWordDsl.Tests/Tests.fs`'s own round-trip assertion
+  normalizes it away before comparing, the same treatment `DocumentProtection.Password`
+  gets there for the same "known write-time-only field" reason).
 - **Simple fields**: raw field instruction text (e.g. `"PAGE"`) plus a cached display value
   - this DSL never evaluates a field itself, the same "cachedValue is the only number that
     will ever exist until something else computes one" posture Excel's `CellValue.Formula`
@@ -133,14 +147,6 @@ inexact, lossy, or simply not implemented yet, so you know what to expect from a
   (see "Modeled faithfully" above) - a table of contents, cross-reference, or any other
   field that depends on document layout is never actually computed by this DSL, unlike
   Excel's pivot tables (which *do* perform real aggregation at write time).
-- **Comments spanning more than one paragraph.** `Inline.Comment` is scoped to wrapping
-  inline content within a single paragraph - unlike `Bookmark` (which now has
-  `BookmarkRangeStart`/`End` for the multi-paragraph case, see "Modeled faithfully"
-  above), splitting `Comment` the same way would also need to relocate its metadata
-  (author/initials/date/text), which lives wrapped inside the case itself today rather
-  than in a separate id-keyed table the way footnotes/table styles are. A foreign file
-  with a comment spanning multiple paragraphs degrades on read (the range is not
-  reconstructed across the paragraph boundary).
 - **The "second" band of each table-style banding axis.** `TableStyleDefinition.
   BandedRow`/`BandedColumn` apply to the odd/first band only (`w:type="band1Horz"`/
   `"band1Vert"`) - a distinct look for the even band (`band2Horz`/`band2Vert`) isn't

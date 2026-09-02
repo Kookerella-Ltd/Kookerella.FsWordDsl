@@ -492,6 +492,20 @@ module Json =
                       :> JsonNode
                   ) ]
             :> JsonNode
+        | CommentRangeStart(id, author, initials, date, text) ->
+            obj_
+                [ "commentRangeStart",
+                  Some(
+                      obj_
+                          [ "id", Some(jstr id)
+                            "author", Some(jstr author)
+                            "initials", initials |> Option.map jstr
+                            "date", date |> Option.map (fun d -> jstr (d.ToString("o")))
+                            "text", Some(jstr text) ]
+                      :> JsonNode
+                  ) ]
+            :> JsonNode
+        | CommentRangeEnd id -> obj_ [ "commentRangeEnd", Some(jstr id) ] :> JsonNode
         | Field(instr, cached) ->
             obj_ [ "field", Some(obj_ [ "instruction", Some(jstr instr); "cachedResult", cached |> Option.map jstr ] :> JsonNode) ] :> JsonNode
         | Footnote content -> obj_ [ "footnote", Some(JsonArray(content |> List.map blockToJson |> Array.ofList) :> JsonNode) ] :> JsonNode
@@ -527,6 +541,11 @@ module Json =
             elif not (isNull o.["comment"]) then
                 let c = o.["comment"].AsObject()
                 Comment(str "author" c |> Option.get, str "initials" c, str "date" c |> Option.map DateTime.Parse, str "text" c |> Option.get, arr "content" c |> List.map inlineOfJson)
+            elif not (isNull o.["commentRangeStart"]) then
+                let c = o.["commentRangeStart"].AsObject()
+                CommentRangeStart(str "id" c |> Option.get, str "author" c |> Option.get, str "initials" c, str "date" c |> Option.map DateTime.Parse, str "text" c |> Option.get)
+            elif not (isNull o.["commentRangeEnd"]) then
+                CommentRangeEnd(o.["commentRangeEnd"].GetValue<string>())
             elif not (isNull o.["field"]) then
                 let f = o.["field"].AsObject()
                 Field(str "instruction" f |> Option.get, str "cachedResult" f)

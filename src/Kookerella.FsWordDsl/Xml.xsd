@@ -145,6 +145,8 @@
         <xs:element name="bookmarkRangeStart" type="bookmarkRangeMarkerType" />
         <xs:element name="bookmarkRangeEnd" type="bookmarkRangeMarkerType" />
         <xs:element name="comment" type="commentType" />
+        <xs:element name="commentRangeStart" type="commentRangeStartType" />
+        <xs:element name="commentRangeEnd" type="commentRangeEndType" />
         <xs:element name="field" type="fieldType" />
         <xs:element name="footnote" type="noteType" />
         <xs:element name="endnote" type="noteType" />
@@ -222,6 +224,24 @@
     <xs:attribute name="author" type="xs:string" use="required" />
     <xs:attribute name="initials" type="xs:string" />
     <xs:attribute name="date" type="xs:string" />
+  </xs:complexType>
+
+  <!-- A cross-paragraph comment boundary marker (`Inline.CommentRangeStart`/`End`) -
+       usable on its own, unlike `commentType` (which wraps its own content).
+       `commentRangeStartType` carries the comment's own metadata itself, since there's no
+       wrapping element here to hang it off. -->
+  <xs:complexType name="commentRangeStartType">
+    <xs:sequence>
+      <xs:element name="text" type="xs:string" />
+    </xs:sequence>
+    <xs:attribute name="id" type="xs:string" use="required" />
+    <xs:attribute name="author" type="xs:string" use="required" />
+    <xs:attribute name="initials" type="xs:string" />
+    <xs:attribute name="date" type="xs:string" />
+  </xs:complexType>
+
+  <xs:complexType name="commentRangeEndType">
+    <xs:attribute name="id" type="xs:string" use="required" />
   </xs:complexType>
 
   <xs:complexType name="fieldType">

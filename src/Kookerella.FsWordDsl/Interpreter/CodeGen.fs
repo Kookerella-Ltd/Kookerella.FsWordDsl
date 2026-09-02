@@ -171,6 +171,10 @@ module CodeGen =
         | Comment(author, initials, date, text, content) ->
             let dateStr = renderOption (fun (d: System.DateTime) -> sprintf "System.DateTime.Parse(%s)" (quote (d.ToString("o")))) date
             sprintf "Comment(%s, %s, %s, %s, %s)" (quote author) (renderOption quote initials) dateStr (quote text) (renderList renderInline content)
+        | CommentRangeStart(id, author, initials, date, text) ->
+            let dateStr = renderOption (fun (d: System.DateTime) -> sprintf "System.DateTime.Parse(%s)" (quote (d.ToString("o")))) date
+            sprintf "CommentRangeStart(%s, %s, %s, %s, %s)" (quote id) (quote author) (renderOption quote initials) dateStr (quote text)
+        | CommentRangeEnd id -> sprintf "CommentRangeEnd(%s)" (quote id)
         | Field(instr, cached) -> sprintf "Field(%s, %s)" (quote instr) (renderOption quote cached)
         | Footnote content -> sprintf "Footnote(%s)" (renderList renderBlock content)
         | Endnote content -> sprintf "Endnote(%s)" (renderList renderBlock content)

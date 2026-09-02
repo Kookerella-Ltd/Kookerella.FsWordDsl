@@ -462,6 +462,16 @@ module Xml =
                 XElement(xn "text", text),
                 XElement(xn "content", content |> List.map inlineToXml)
             )
+        | CommentRangeStart(id, author, initials, date, text) ->
+            XElement(
+                xn "commentRangeStart",
+                attr "id" id,
+                attr "author" author,
+                attrOpt "initials" initials,
+                attrOpt "date" (date |> Option.map (fun d -> d.ToString("o"))),
+                XElement(xn "text", text)
+            )
+        | CommentRangeEnd id -> XElement(xn "commentRangeEnd", attr "id" id)
         | Field(instr, cached) -> XElement(xn "field", attr "instruction" instr, attrOpt "cachedResult" cached)
         | Footnote content -> XElement(xn "footnote", XElement(xn "body", content |> List.map blockToXml))
         | Endnote content -> XElement(xn "endnote", XElement(xn "body", content |> List.map blockToXml))
@@ -484,6 +494,10 @@ module Xml =
             let content = el.Element(xn "content").Elements() |> Seq.map inlineOfXml |> List.ofSeq
             let text = el.Element(xn "text").Value
             Comment(el.Attribute(xn "author").Value, strAttr "initials" el, strAttr "date" el |> Option.map DateTime.Parse, text, content)
+        | "commentRangeStart" ->
+            let text = el.Element(xn "text").Value
+            CommentRangeStart(el.Attribute(xn "id").Value, el.Attribute(xn "author").Value, strAttr "initials" el, strAttr "date" el |> Option.map DateTime.Parse, text)
+        | "commentRangeEnd" -> CommentRangeEnd(el.Attribute(xn "id").Value)
         | "field" -> Field(el.Attribute(xn "instruction").Value, strAttr "cachedResult" el)
         | "footnote" -> Footnote(el.Element(xn "body").Elements() |> Seq.map blockOfXml |> List.ofSeq)
         | "endnote" -> Endnote(el.Element(xn "body").Elements() |> Seq.map blockOfXml |> List.ofSeq)

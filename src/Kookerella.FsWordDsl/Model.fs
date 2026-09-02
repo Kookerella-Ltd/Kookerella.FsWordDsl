@@ -51,12 +51,28 @@ module Model =
         | BookmarkRangeStart of name: string
         | BookmarkRangeEnd of name: string
         /// `Date = None` is written as "now" at write time - Word records a comment's own
-        /// timestamp, this DSL doesn't require the caller to supply one. Scoped to within a
-        /// single paragraph - a comment spanning more than one paragraph is a documented
-        /// gap (see MAPPING.md; unlike `Bookmark`, splitting `Comment` the same way
-        /// `BookmarkRangeStart`/`End` do would also need to relocate its metadata, which
-        /// lives wrapped in this same case today).
+        /// timestamp, this DSL doesn't require the caller to supply one. Wraps its own
+        /// content, scoped to within a single paragraph - the ergonomic, common case. A
+        /// comment spanning more than one paragraph is `CommentRangeStart`/`CommentRangeEnd`
+        /// instead (see those cases' own doc comments).
         | Comment of author: string * initials: string option * date: DateTime option * text: string * content: Inline list
+        /// A comment boundary marker usable on its own, for a comment spanning more than one
+        /// paragraph - unlike `Comment`, which wraps its own content, this carries the
+        /// comment's own metadata itself (there's no wrapping case here to hang it off).
+        /// `id` is a caller-chosen correlation key matching this start to its
+        /// `CommentRangeEnd` elsewhere in the document - unlike `Bookmark`'s `name`, OOXML
+        /// has nowhere to persist an arbitrary string alongside a comment range (only a
+        /// numeric `w:id`, which `Writer` assigns itself), so `id` is write-time-only: it
+        /// does not round-trip, `Reader` reconstructs some id from the real OOXML `w:id`
+        /// instead, which will generally not match what you wrote. Nothing else in a
+        /// document ever references a comment by this id the way `InternalBookmark` can
+        /// reference a bookmark's own `name`, so that's never a practical problem.
+        | CommentRangeStart of id: string * author: string * initials: string option * date: DateTime option * text: string
+        /// Closes the range opened by the `CommentRangeStart` with the same `id` earlier in
+        /// the document body. Order matters: `Reader` treats a `CommentRangeStart` with no
+        /// matching `CommentRangeEnd` later in the body as unterminated and drops it, same
+        /// "best-effort on a foreign file" posture the rest of `Reader` takes.
+        | CommentRangeEnd of id: string
         /// A "simple field" (`w:fldSimple`) - raw field instruction text (e.g. `"PAGE"`,
         /// `"DATE \\@ \"MMMM d, yyyy\""`) plus the cached display text Word showed before
         /// its own recalculation. This DSL never evaluates a field itself, the same

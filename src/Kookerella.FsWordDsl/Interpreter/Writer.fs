@@ -38,6 +38,12 @@ module Writer =
           /// a cross-paragraph bookmark, written independently, still share OOXML's own
           /// required matching id even though only `BookmarkRangeStart` carries `name`.
           OpenBookmarkRanges: Collections.Generic.Dictionary<string, int>
+          /// The comment-range equivalent of `OpenBookmarkRanges` - caller-chosen `id` ->
+          /// the real OOXML comment id assigned when its `CommentRangeStart` was written.
+          /// Comment ids are already `StringValue`s on the wire (see `Comment`'s own
+          /// handling below), so this stores the assigned id as a string directly rather
+          /// than needing the int<->string conversion `OpenBookmarkRanges` does.
+          OpenCommentRanges: Collections.Generic.Dictionary<string, string>
           mutable NextBookmarkId: int
           mutable NextCommentId: int
           mutable NextDrawingId: uint32
@@ -199,6 +205,25 @@ module Writer =
             pPr.NumberingProperties <- Wordprocessing.NumberingProperties(Wordprocessing.NumberingLevelReference(Val = Int32Value level), Wordprocessing.NumberingId(Val = Int32Value numId))
             Some pPr
 
+    /// Assigns a fresh comment id, builds its `word/comments.xml` metadata entry, and adds
+    /// it to `ctx.Comments` - shared by the wrapping `Comment` case and `CommentRangeStart`
+    /// below, which differ only in how the surrounding range/content is written. Returns
+    /// the assigned id (as a string, matching `w:id`'s own wire type).
+    let private addCommentMetadata (ctx: Ctx) (author: string) (initials: string option) (date: DateTime option) (text: string) : string =
+        let id = ctx.NextCommentId
+        ctx.NextCommentId <- id + 1
+        let idStr = string id
+
+        let cmt = Wordprocessing.Comment(Id = StringValue idStr, Author = StringValue author)
+        cmt.Date <- DateTimeValue(defaultArg date DateTime.Now)
+        initials |> Option.iter (fun i -> cmt.Initials <- StringValue i)
+        let commentPara = Wordprocessing.Paragraph()
+        commentPara.AppendChild(runWith (Wordprocessing.Text(text))) |> ignore
+        cmt.AppendChild(commentPara) |> ignore
+        ctx.Comments.Add(cmt)
+
+        idStr
+
     let rec private inlineToElements (ctx: Ctx) (inl: Inline) : OpenXmlElement list =
         match inl with
         | Run(text, style, styleId) -> [ textRun text style styleId :> OpenXmlElement ]
@@ -241,23 +266,23 @@ module Writer =
                 [ Wordprocessing.BookmarkEnd(Id = StringValue(string id)) :> OpenXmlElement ]
             | false, _ -> failwithf "BookmarkRangeEnd %s has no matching BookmarkRangeStart" name
         | Comment(author, initials, date, text, content) ->
-            let id = ctx.NextCommentId
-            ctx.NextCommentId <- id + 1
-            let idStr = string id
-
-            let cmt = Wordprocessing.Comment(Id = StringValue idStr, Author = StringValue author)
-            cmt.Date <- DateTimeValue(defaultArg date DateTime.Now)
-            initials |> Option.iter (fun i -> cmt.Initials <- StringValue i)
-            let commentPara = Wordprocessing.Paragraph()
-            commentPara.AppendChild(runWith (Wordprocessing.Text(text))) |> ignore
-            cmt.AppendChild(commentPara) |> ignore
-            ctx.Comments.Add(cmt)
-
+            let idStr = addCommentMetadata ctx author initials date text
             let startEl = Wordprocessing.CommentRangeStart(Id = StringValue idStr) :> OpenXmlElement
             let endEl = Wordprocessing.CommentRangeEnd(Id = StringValue idStr) :> OpenXmlElement
             let refRun = runWith (Wordprocessing.CommentReference(Id = StringValue idStr)) :> OpenXmlElement
             let contentEls = content |> List.collect (inlineToElements ctx)
             [ startEl ] @ contentEls @ [ endEl; refRun ]
+        | CommentRangeStart(callerId, author, initials, date, text) ->
+            let idStr = addCommentMetadata ctx author initials date text
+            ctx.OpenCommentRanges.[callerId] <- idStr
+            [ Wordprocessing.CommentRangeStart(Id = StringValue idStr) :> OpenXmlElement ]
+        | CommentRangeEnd callerId ->
+            match ctx.OpenCommentRanges.TryGetValue callerId with
+            | true, idStr ->
+                ctx.OpenCommentRanges.Remove(callerId) |> ignore
+                [ Wordprocessing.CommentRangeEnd(Id = StringValue idStr) :> OpenXmlElement
+                  runWith (Wordprocessing.CommentReference(Id = StringValue idStr)) :> OpenXmlElement ]
+            | false, _ -> failwithf "CommentRangeEnd %s has no matching CommentRangeStart" callerId
         | Field(instruction, cachedResult) ->
             let sf = Wordprocessing.SimpleField(Instruction = StringValue instruction)
             cachedResult |> Option.iter (fun c -> sf.AppendChild(runWith (Wordprocessing.Text(c))) |> ignore)
@@ -635,6 +660,7 @@ module Writer =
             { MainPart = mainPart
               Comments = ResizeArray()
               OpenBookmarkRanges = Collections.Generic.Dictionary()
+              OpenCommentRanges = Collections.Generic.Dictionary()
               Footnotes = ResizeArray()
               Endnotes = ResizeArray()
               NextBookmarkId = 1

@@ -137,6 +137,17 @@ module Reader =
                 | _ -> None)
             |> List.ofSeq
 
+    /// Looks up a comment's own metadata by its real OOXML id - shared by the wrapping
+    /// `Comment` case and `CommentRangeStart` below, which differ only in how the
+    /// surrounding range/content is read.
+    let private commentMetaOfId (rctx: ReadCtx) (id: string) : string * string option * DateTime option * string =
+        let meta = rctx.CommentsById.TryFind id
+        let author = meta |> Option.map (fun c -> c.Author.Value) |> Option.defaultValue ""
+        let initials = meta |> Option.bind (fun c -> c.Initials |> opt) |> Option.map (fun v -> v.Value)
+        let date = meta |> Option.bind (fun c -> c.Date |> opt) |> Option.map (fun v -> v.Value)
+        let text = meta |> Option.map (fun c -> c.InnerText) |> Option.defaultValue ""
+        author, initials, date, text
+
     let rec private parseInlineRange
         (elements: OpenXmlElement[])
         (startIdx: int)
@@ -203,14 +214,34 @@ module Reader =
                             | :? Wordprocessing.Run as r -> r.Elements<Wordprocessing.CommentReference>() |> Seq.exists (fun cr -> cr.Id.Value = id)
                             | _ -> false)
 
-                    let meta = rctx.CommentsById.TryFind id
-                    let author = meta |> Option.map (fun c -> c.Author.Value) |> Option.defaultValue ""
-                    let initials = meta |> Option.bind (fun c -> c.Initials |> opt) |> Option.map (fun v -> v.Value)
-                    let date = meta |> Option.bind (fun c -> c.Date |> opt) |> Option.map (fun v -> v.Value)
-                    let text = meta |> Option.map (fun c -> c.InnerText) |> Option.defaultValue ""
+                    let author, initials, date, text = commentMetaOfId rctx id
                     result.Add(Comment(author, initials, date, text, content))
                     i <- if refConsumed then afterEnd + 1 else afterEnd
-                | None -> i <- i + 1
+                | None ->
+                    // No matching `CommentRangeEnd` within this same paragraph's own
+                    // elements - its other half is in a later paragraph, so this is one end
+                    // of a cross-paragraph comment rather than the single-paragraph
+                    // `Comment` case. The reconstructed `id` is the real OOXML id, not
+                    // whatever string a caller originally wrote (see `CommentRangeStart`'s
+                    // own doc comment on why that's fine).
+                    let author, initials, date, text = commentMetaOfId rctx id
+                    result.Add(CommentRangeStart(id, author, initials, date, text))
+                    i <- i + 1
+            | :? Wordprocessing.CommentRangeEnd as cre ->
+                // Reached directly (not consumed by the `CommentRangeStart` case above), so
+                // its `CommentRangeStart` was in an earlier paragraph - the closing half of
+                // a cross-paragraph comment.
+                let id = cre.Id.Value
+                result.Add(CommentRangeEnd id)
+                let afterEnd = i + 1
+
+                let refConsumed =
+                    afterEnd < endIdxExclusive
+                    && (match elements.[afterEnd] with
+                        | :? Wordprocessing.Run as r -> r.Elements<Wordprocessing.CommentReference>() |> Seq.exists (fun cr -> cr.Id.Value = id)
+                        | _ -> false)
+
+                i <- if refConsumed then afterEnd + 1 else afterEnd
             | :? Wordprocessing.Hyperlink as hl ->
                 let children = hl.ChildElements |> Seq.cast<OpenXmlElement> |> Array.ofSeq
                 let innerInlines = parseInlineRange children 0 children.Length mainPart rctx

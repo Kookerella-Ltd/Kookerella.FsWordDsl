@@ -36,6 +36,48 @@ let private assertSchemaValid (path: string) =
         String.Join("\n", errors |> Seq.map (fun e -> sprintf "%s: %s" e.Path.XPath e.Description))
     )
 
+/// `CommentRangeStart`/`CommentRangeEnd`'s own `id` is documented as write-time-only (see
+/// `Model.Inline.CommentRangeStart`'s own doc comment) - `Reader` reconstructs some id from
+/// the real OOXML `w:id`, which generally won't match what a caller originally wrote, so
+/// `verifyScenarioNamed`'s own round-trip assertion normalizes it away on both sides first,
+/// the same "known-lossy field, compare with it blanked out" treatment `Password` gets.
+let private normalizeCommentRangeIds (sections: Section list) : Section list =
+    let rec normalizeInline (i: Inline) : Inline =
+        match i with
+        | Hyperlink(target, runs, tooltip) -> Hyperlink(target, runs |> List.map normalizeInline, tooltip)
+        | Bookmark(name, content) -> Bookmark(name, content |> List.map normalizeInline)
+        | Comment(author, initials, date, text, content) -> Comment(author, initials, date, text, content |> List.map normalizeInline)
+        | CommentRangeStart(_, author, initials, date, text) -> CommentRangeStart("_", author, initials, date, text)
+        | CommentRangeEnd _ -> CommentRangeEnd "_"
+        | Footnote content -> Footnote(content |> List.map normalizeBlock)
+        | Endnote content -> Endnote(content |> List.map normalizeBlock)
+        | other -> other
+
+    and normalizeBlock (b: Block) : Block =
+        match b with
+        | ParagraphBlock p -> ParagraphBlock { p with Inlines = p.Inlines |> List.map normalizeInline }
+        | TableBlock t ->
+            TableBlock
+                { t with
+                    Rows =
+                        t.Rows
+                        |> List.map (fun r ->
+                            { r with Cells = r.Cells |> List.map (fun c -> { c with Content = c.Content |> List.map normalizeBlock }) }) }
+
+    let normalizeHeaderFooterSet (h: HeaderFooterSet) : HeaderFooterSet =
+        { Default = h.Default |> Option.map (List.map normalizeBlock)
+          First = h.First |> Option.map (List.map normalizeBlock)
+          Even = h.Even |> Option.map (List.map normalizeBlock) }
+
+    sections
+    |> List.map (fun s ->
+        { s with
+            Body = s.Body |> List.map normalizeBlock
+            Properties =
+                { s.Properties with
+                    Header = s.Properties.Header |> Option.map normalizeHeaderFooterSet
+                    Footer = s.Properties.Footer |> Option.map normalizeHeaderFooterSet } })
+
 let private codeGenReferenceLines =
     [ sprintf "#r \"%s\"" (typeof<Document>.Assembly.Location.Replace("\\", "\\\\"))
       sprintf "#r \"%s\"" (typeof<WordprocessingDocument>.Assembly.Location.Replace("\\", "\\\\")) ]
@@ -53,7 +95,7 @@ let private verifyScenarioNamed (name: string) (fileName: string) (doc: Document
     assertSchemaValid path
 
     let roundTripped = Document.load path
-    Assert.Equal<Section list>(doc.Sections, roundTripped.Sections)
+    Assert.Equal<Section list>(doc.Sections |> normalizeCommentRangeIds, roundTripped.Sections |> normalizeCommentRangeIds)
     Assert.Equal<StyleDefinition list>(doc.Styles, roundTripped.Styles)
     Assert.Equal<NumberingDefinition list>(doc.Numbering, roundTripped.Numbering)
 
@@ -361,6 +403,21 @@ let ``Comments`` () =
     verifyScenarioNamed "Comments" "output.docx" doc
 
 [<Fact>]
+let ``Comments_MultiParagraph`` () =
+    let doc =
+        document
+            [ section
+                  [ para [ run "Before the comment." ]
+                    para
+                        [ CommentRangeStart("review1", "Alex", Some "AR", Some(DateTime(2024, 1, 15, 9, 30, 0)), "This whole section needs a second look.")
+                          run "The comment starts on this paragraph" ]
+                    para [ run "and continues through this one" ]
+                    para [ run "and ends on this one."; CommentRangeEnd "review1" ]
+                    para [ run "After the comment." ] ] ]
+
+    verifyScenarioNamed "Comments_MultiParagraph" "output.docx" doc
+
+[<Fact>]
 let ``FootnotesAndEndnotes`` () =
     let props =
         { SectionProperties.Default with
@@ -538,6 +595,7 @@ let ``Table_CustomStyleAndHeaderRow`` () =
 [<InlineData("Bookmark_MultiParagraph")>]
 [<InlineData("Hyperlink_Internal")>]
 [<InlineData("Comments")>]
+[<InlineData("Comments_MultiParagraph")>]
 [<InlineData("FootnotesAndEndnotes")>]
 [<InlineData("PageSetupLandscape")>]
 [<InlineData("HeaderFooterDefault")>]

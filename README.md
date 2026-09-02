@@ -61,10 +61,11 @@ reasoning and what adding either would look like.
   - `DocumentProperties.fs` - `DocumentProperties` (Title, Author, Subject, Keywords,
     Comments, Category, Company) - core document metadata, `Document.Properties`.
   - `Model.fs` - the recursive content model: `Inline` (runs, breaks, images, hyperlinks,
-    bookmarks - both the single-paragraph `Bookmark` and the cross-paragraph
-    `BookmarkRangeStart`/`End` markers, comments, simple fields, footnotes/endnotes),
-    `Paragraph`, `Block` (paragraph or table), `TableCell`/`TableRow` (including
-    `RepeatAsHeader`)/`TableEntry` (including `CellMargins`), `HeaderFooterSet`,
+    bookmarks and comments - both the single-paragraph `Bookmark`/`Comment` cases and the
+    cross-paragraph `BookmarkRangeStart`/`End`/`CommentRangeStart`/`End` markers, simple
+    fields, footnotes/endnotes), `Paragraph`, `Block` (paragraph or table), `TableCell`/
+    `TableRow` (including `RepeatAsHeader`)/`TableEntry` (including `CellMargins`),
+    `HeaderFooterSet`,
     `SectionProperties` (including `BreakType` and `FootnoteNumbering`/
     `EndnoteNumbering`), `Section`, `Document` (including `Document.VbaProject`, a
     macro-enabled document's raw `vbaProject.bin` bytes, `Document.Properties`, and
@@ -298,21 +299,28 @@ let footer = { HeaderFooterSet.None with Default = Some [ para [ run "Page "; Fi
 sectionWith { SectionProperties.Default with Footer = Some footer } [ para [ run "Body text." ] ]
 ```
 
-Comments and bookmarks wrap inline content directly (comments are scoped to within one
-paragraph - see [MAPPING.md](MAPPING.md)):
+Comments and bookmarks wrap inline content directly, the common single-paragraph case:
 
 ```fsharp
 para [ comment ([ run "This figure needs review." ], "Please double check the totals.", author = "Alex") ]
 ```
 
-A bookmark spanning more than one paragraph uses `BookmarkRangeStart`/`BookmarkRangeEnd`
-instead - two independent markers placed directly in separate paragraphs, sharing a name:
+Either spanning more than one paragraph uses two independent markers placed directly in
+separate paragraphs instead, sharing an id - `BookmarkRangeStart`/`BookmarkRangeEnd` for
+bookmarks, `CommentRangeStart`/`CommentRangeEnd` for comments (which carries the comment's
+own metadata on its `Start`, since there's no wrapping case here to hang it off - see
+[MAPPING.md](MAPPING.md) on why that id is write-time-only, unlike a bookmark's own name):
 
 ```fsharp
 document
     [ section
           [ para [ BookmarkRangeStart "Section2"; run "This paragraph starts the bookmark" ]
             para [ run "and this one ends it."; BookmarkRangeEnd "Section2" ] ] ]
+
+document
+    [ section
+          [ para [ CommentRangeStart("review1", "Alex", None, None, "This section needs review."); run "Comment starts here" ]
+            para [ run "and ends here."; CommentRangeEnd "review1" ] ] ]
 ```
 
 Document-level protection, macros, and core properties are all pipe-friendly, same shape as
