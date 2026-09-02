@@ -5,6 +5,12 @@
       <pageSetup orientation="Portrait" columns="1" breakType="NextPageBreak">
         <pageSize kind="Letter" />
         <margins top="72" bottom="72" left="72" right="72" header="36" footer="36" gutter="0" />
+        <footnoteNumbering restart="RestartEachPage">
+          <format kind="LowerRomanFormat" />
+        </footnoteNumbering>
+        <endnoteNumbering startAt="100" restart="ContinuousRestart">
+          <format kind="DecimalFormat" />
+        </endnoteNumbering>
       </pageSetup>
       <body>
         <para>

@@ -23,7 +23,9 @@
                 </para>
               </cell>
               <cell>
-                <cellProps width="150" />
+                <cellProps width="150">
+                  <cellMargins top="2" bottom="2" left="8" right="8" />
+                </cellProps>
                 <para>
                   <run>Amount</run>
                 </para>
@@ -116,7 +118,15 @@
       <firstRow cellShading="4F81BD">
         <runStyle bold="true" color="FFFFFF" />
       </firstRow>
+      <lastRow>
+        <runStyle italic="true" />
+      </lastRow>
+      <firstColumn>
+        <runStyle bold="true" />
+      </firstColumn>
       <bandedRow cellShading="DCE6F1" />
+      <bandedColumn cellShading="F2F2F2" />
+      <northWestCell cellShading="2D5082" />
     </tableStyleDef>
   </tableStyles>
 </document>

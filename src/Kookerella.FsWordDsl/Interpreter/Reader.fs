@@ -23,7 +23,13 @@ module Reader =
     type private ReadCtx =
         { CommentsById: Map<string, Wordprocessing.Comment>
           FootnotesById: Map<int, Block list>
-          EndnotesById: Map<int, Block list> }
+          EndnotesById: Map<int, Block list>
+          /// Every `w:bookmarkStart`'s own id -> name, built once from the whole document
+          /// body before per-paragraph reading begins - needed because a `BookmarkEnd`
+          /// reached on its own (no matching `BookmarkStart` earlier in the same
+          /// paragraph's own `elements` array, i.e. the other half of a cross-paragraph
+          /// bookmark) carries only an id, never a name.
+          BookmarkNamesById: Map<string, string> }
 
     // --- Numbering --------------------------------------------------------------------------
 
@@ -159,7 +165,23 @@ module Reader =
                     let content = parseInlineRange elements (i + 1) endIdx mainPart rctx
                     result.Add(Bookmark(name, content))
                     i <- endIdx + 1
-                | None -> i <- i + 1
+                | None ->
+                    // No matching `BookmarkEnd` within this same paragraph's own elements -
+                    // its other half is in a later paragraph, so this is one end of a
+                    // cross-paragraph bookmark rather than the single-paragraph `Bookmark`
+                    // case.
+                    result.Add(BookmarkRangeStart name)
+                    i <- i + 1
+            | :? Wordprocessing.BookmarkEnd as be ->
+                // Reached directly (not consumed by the `BookmarkStart` case above), so its
+                // `BookmarkStart` was in an earlier paragraph - the closing half of a
+                // cross-paragraph bookmark. `BookmarkNamesById` supplies the name, which a
+                // bare `w:bookmarkEnd` never carries itself.
+                match rctx.BookmarkNamesById.TryFind be.Id.Value with
+                | Some name -> result.Add(BookmarkRangeEnd name)
+                | None -> ()
+
+                i <- i + 1
             | :? Wordprocessing.CommentRangeStart as crs ->
                 let id = crs.Id.Value
 
@@ -327,7 +349,7 @@ module Reader =
                                     match vm.Val |> opt with
                                     | Some v when v.Value = Wordprocessing.MergedCellValues.Continue -> ContinueMerge
                                     | _ -> RestartMerge)
-                              Shading = tcPr |> Option.bind (fun p -> p.Shading |> opt) |> Option.bind (fun s -> s.Fill |> opt) |> Option.map (fun v -> colorOfHex v.Value)
+                              Shading = tcPr |> Option.bind (fun p -> p.Shading |> opt) |> Option.map colorOfShadingFill
                               Borders =
                                 tcPr
                                 |> Option.bind (fun p -> p.TableCellBorders |> opt)
@@ -343,7 +365,15 @@ module Reader =
                                 tcPr
                                 |> Option.bind (fun p -> p.TableCellWidth |> opt)
                                 |> Option.bind (fun w -> w.Width |> opt)
-                                |> Option.map (fun v -> twipsToPoints v.Value) }
+                                |> Option.map (fun v -> twipsToPoints v.Value)
+                              Margins =
+                                tcPr
+                                |> Option.bind (fun p -> p.TableCellMargin |> opt)
+                                |> Option.map (fun m ->
+                                    { Top = m.TopMargin |> opt |> Option.bind (fun v -> v.Width |> opt) |> Option.map (fun v -> twipsToPoints v.Value)
+                                      Bottom = m.BottomMargin |> opt |> Option.bind (fun v -> v.Width |> opt) |> Option.map (fun v -> twipsToPoints v.Value)
+                                      Left = m.LeftMargin |> opt |> Option.bind (fun v -> v.Width |> opt) |> Option.map (fun v -> twipsToPoints v.Value)
+                                      Right = m.RightMargin |> opt |> Option.bind (fun v -> v.Width |> opt) |> Option.map (fun v -> twipsToPoints v.Value) }) }
 
                         let content =
                             tc.ChildElements
@@ -453,6 +483,24 @@ module Reader =
                   First = find Wordprocessing.HeaderFooterValues.First
                   Even = find Wordprocessing.HeaderFooterValues.Even }
 
+    let private noteNumberRestartOfW (v: Wordprocessing.RestartNumberValues) : NoteNumberRestart =
+        if v = Wordprocessing.RestartNumberValues.EachSection then RestartEachSection
+        elif v = Wordprocessing.RestartNumberValues.EachPage then RestartEachPage
+        else ContinuousRestart
+
+    /// Shared by `FootnoteProperties`/`EndnoteProperties` reading below - both carry the
+    /// identically-shaped `NumberingFormat`/`NumberingStart`/`NumberingRestart` triple,
+    /// just under different container element types (no common base the SDK exposes this
+    /// through, so the caller passes each child in rather than the container itself).
+    let private noteNumberingSettingsOfW
+        (numFmt: Wordprocessing.NumberingFormat option)
+        (numStart: Wordprocessing.NumberingStart option)
+        (numRestart: Wordprocessing.NumberingRestart option)
+        : NoteNumberingSettings =
+        { Format = numFmt |> Option.bind (fun f -> f.Val |> opt) |> Option.map (fun v -> numberFormatKindOfW v.Value) |> Option.defaultValue DecimalFormat
+          StartAt = numStart |> Option.bind (fun s -> s.Val |> opt) |> Option.map (fun v -> int v.Value)
+          Restart = numRestart |> Option.bind (fun r -> r.Val |> opt) |> Option.map (fun v -> noteNumberRestartOfW v.Value) |> Option.defaultValue ContinuousRestart }
+
     let private sectionPropertiesOfW (mainPart: MainDocumentPart) (rctx: ReadCtx) (sectPr: Wordprocessing.SectionProperties) : SectionProperties =
         let pageSize, orientation = pageSizeAndOrientationOfW (sectPr.GetFirstChild<Wordprocessing.PageSize>() |> opt)
         let margins = pageMarginsOfW (sectPr.GetFirstChild<Wordprocessing.PageMargin>() |> opt)
@@ -492,6 +540,16 @@ module Reader =
                 else NextPageBreak)
             |> Option.defaultValue NextPageBreak
 
+        let footnoteNumbering =
+            sectPr.GetFirstChild<Wordprocessing.FootnoteProperties>()
+            |> opt
+            |> Option.map (fun fpr -> noteNumberingSettingsOfW (fpr.NumberingFormat |> opt) (fpr.NumberingStart |> opt) (fpr.NumberingRestart |> opt))
+
+        let endnoteNumbering =
+            sectPr.GetFirstChild<Wordprocessing.EndnoteProperties>()
+            |> opt
+            |> Option.map (fun epr -> noteNumberingSettingsOfW (epr.NumberingFormat |> opt) (epr.NumberingStart |> opt) (epr.NumberingRestart |> opt))
+
         { PageSize = pageSize
           Orientation = orientation
           Margins = margins
@@ -499,7 +557,9 @@ module Reader =
           Footer = headerFooterSetOfRefs (readFooterPart mainPart rctx) footerRefs
           PageNumberStart = pageNumStart
           Columns = columns
-          BreakType = breakType }
+          BreakType = breakType
+          FootnoteNumbering = footnoteNumbering
+          EndnoteNumbering = endnoteNumbering }
 
     // --- Sections -------------------------------------------------------------------------
 
@@ -569,10 +629,23 @@ module Reader =
             |> Option.map (fun cs -> cs.Elements<Wordprocessing.Comment>() |> Seq.map (fun c -> c.Id.Value, c) |> Map.ofSeq)
             |> Option.defaultValue Map.empty
 
+        // Every `w:bookmarkStart`'s id -> name, from the whole body - a bookmark spanning
+        // multiple paragraphs is readable as two independent markers (`BookmarkRangeStart`/
+        // `BookmarkRangeEnd`, see `parseInlineRange`), so this can't wait to be built
+        // lazily per-paragraph the way a within-paragraph `Bookmark` is.
+        let bookmarkNamesById =
+            mainPart.Document.Body.Descendants<Wordprocessing.BookmarkStart>()
+            |> Seq.map (fun bs -> bs.Id.Value, bs.Name.Value)
+            |> Map.ofSeq
+
         // Note bodies never contain a *nested* footnote/endnote reference (not a real Word
         // feature) - only `CommentsById` needs to be real when reading them, so this
         // bootstraps with empty note maps rather than needing a two-pass/lazy `rctx`.
-        let noteReadCtx = { CommentsById = commentsById; FootnotesById = Map.empty; EndnotesById = Map.empty }
+        let noteReadCtx =
+            { CommentsById = commentsById
+              FootnotesById = Map.empty
+              EndnotesById = Map.empty
+              BookmarkNamesById = bookmarkNamesById }
 
         let readNormalNotes (elements: Wordprocessing.FootnoteEndnoteType seq) =
             elements
@@ -597,7 +670,8 @@ module Reader =
         let rctx =
             { CommentsById = commentsById
               FootnotesById = footnotesById
-              EndnotesById = endnotesById }
+              EndnotesById = endnotesById
+              BookmarkNamesById = bookmarkNamesById }
 
         let stylesXml = mainPart.StyleDefinitionsPart |> opt |> Option.bind (fun p -> p.Styles |> opt)
         let styles = stylesOfOpenXml stylesXml

@@ -8,13 +8,49 @@ namespace Kookerella.FsWordDsl
 [<AutoOpen>]
 module Styles =
 
-    /// A run's color. Only `Rgb` is modeled - WordprocessingML also allows theme colors on
-    /// a run, which this DSL does not resolve or author, the same documented gap Excel has
-    /// for `Theme`/`Indexed` colors. `Auto` matches OOXML's own "let the reader/theme decide"
-    /// value (the default for new text in Word).
+    /// Word's twelve standard theme color slots (`w:themeColor`/`w:themeFill`) - resolved
+    /// against whatever theme is attached to the document when opened in real Word. This
+    /// DSL doesn't model theme parts (`word/theme/theme1.xml`) themselves - see `Color.
+    /// Theme`'s own doc comment for how that's handled.
+    type ThemeColorKind =
+        | Dark1Theme
+        | Light1Theme
+        | Dark2Theme
+        | Light2Theme
+        | Accent1Theme
+        | Accent2Theme
+        | Accent3Theme
+        | Accent4Theme
+        | Accent5Theme
+        | Accent6Theme
+        | HyperlinkTheme
+        | FollowedHyperlinkTheme
+        | Background1Theme
+        | Text1Theme
+        | Background2Theme
+        | Text2Theme
+
+    /// A run/shading color. `Auto` matches OOXML's own "let the reader/theme decide" value
+    /// (the default for new text in Word).
     type Color =
         | Rgb of red: byte * green: byte * blue: byte
         | Auto
+        /// A theme-relative color (`w:themeColor` plus an explicit `Fallback` RGB - the same
+        /// "always write a computed value alongside the theme token" convention real Word
+        /// itself follows, since this DSL has no theme part to resolve `kind` against; a
+        /// reader with no theme, or one this DSL doesn't understand, still sees `Fallback`).
+        /// `Tint`/`Shade` lighten/darken it (0.0-1.0, matching Word's own tint/shade
+        /// slider) - stored on the wire as a single byte, so an arbitrary `float` here
+        /// round-trips to the nearest `/255`, not bit-for-bit (e.g. `0.5` reads back as
+        /// `~0.502`); a value that's already an exact multiple of `1/255` (`0.2`, `0.4`,
+        /// ...) round-trips exactly, same "the wire format is the one source of truth"
+        /// posture `BorderSide.Width`'s own eighths-of-a-point rounding takes. Only
+        /// modeled for run color and shading/fill backgrounds (`RunStyle.
+        /// Color`, `ParagraphFormat.Shading`, `TableCellProps.Shading`, `TableStyleRegion.
+        /// CellShading`) - a border's own color (`BorderSide.Color`) round-trips a `Theme`
+        /// value as its `Fallback` RGB only, the theme token itself isn't preserved there
+        /// (see MAPPING.md).
+        | Theme of kind: ThemeColorKind * fallback: (byte * byte * byte) * tint: float option * shade: float option
 
     module Color =
         let black = Rgb(0uy, 0uy, 0uy)

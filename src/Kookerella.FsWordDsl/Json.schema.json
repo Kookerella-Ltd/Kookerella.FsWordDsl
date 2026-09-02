@@ -32,7 +32,18 @@
         "footer": { "$ref": "#/$defs/headerFooterSet" },
         "pageNumberStart": { "type": "integer" },
         "columns": { "type": "integer" },
-        "breakType": { "type": "string", "enum": ["NextPageBreak", "ContinuousBreak", "EvenPageBreak", "OddPageBreak"] }
+        "breakType": { "type": "string", "enum": ["NextPageBreak", "ContinuousBreak", "EvenPageBreak", "OddPageBreak"] },
+        "footnoteNumbering": { "$ref": "#/$defs/noteNumberingSettings" },
+        "endnoteNumbering": { "$ref": "#/$defs/noteNumberingSettings" }
+      }
+    },
+    "noteNumberingSettings": {
+      "type": "object",
+      "required": ["format", "restart"],
+      "properties": {
+        "format": {},
+        "startAt": { "type": "integer" },
+        "restart": { "type": "string", "enum": ["ContinuousRestart", "RestartEachSection", "RestartEachPage"] }
       }
     },
     "pageSize": {
@@ -216,7 +227,15 @@
         "borders": { "type": "object" },
         "wholeTable": { "$ref": "#/$defs/tableStyleRegion" },
         "firstRow": { "$ref": "#/$defs/tableStyleRegion" },
-        "bandedRow": { "$ref": "#/$defs/tableStyleRegion" }
+        "lastRow": { "$ref": "#/$defs/tableStyleRegion" },
+        "firstColumn": { "$ref": "#/$defs/tableStyleRegion" },
+        "lastColumn": { "$ref": "#/$defs/tableStyleRegion" },
+        "bandedRow": { "$ref": "#/$defs/tableStyleRegion" },
+        "bandedColumn": { "$ref": "#/$defs/tableStyleRegion" },
+        "northEastCell": { "$ref": "#/$defs/tableStyleRegion" },
+        "northWestCell": { "$ref": "#/$defs/tableStyleRegion" },
+        "southEastCell": { "$ref": "#/$defs/tableStyleRegion" },
+        "southWestCell": { "$ref": "#/$defs/tableStyleRegion" }
       }
     },
     "tableStyleRegion": {

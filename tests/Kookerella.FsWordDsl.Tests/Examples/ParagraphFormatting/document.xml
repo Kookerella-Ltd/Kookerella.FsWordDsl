@@ -37,6 +37,10 @@
           <tab />
           <run>1</run>
         </para>
+        <para>
+          <paragraphFormat shading="theme:accent6:F2DCDB::0.4" />
+          <run>A paragraph shaded with a theme color (Accent6, shaded 40%).</run>
+        </para>
       </body>
     </section>
   </sections>

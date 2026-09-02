@@ -52,13 +52,65 @@ module Json =
         | null -> []
         | n -> n.AsArray() |> List.ofSeq
 
+    let private themeColorKindToStr (k: ThemeColorKind) : string =
+        match k with
+        | Dark1Theme -> "dark1"
+        | Light1Theme -> "light1"
+        | Dark2Theme -> "dark2"
+        | Light2Theme -> "light2"
+        | Accent1Theme -> "accent1"
+        | Accent2Theme -> "accent2"
+        | Accent3Theme -> "accent3"
+        | Accent4Theme -> "accent4"
+        | Accent5Theme -> "accent5"
+        | Accent6Theme -> "accent6"
+        | HyperlinkTheme -> "hyperlink"
+        | FollowedHyperlinkTheme -> "followedHyperlink"
+        | Background1Theme -> "background1"
+        | Text1Theme -> "text1"
+        | Background2Theme -> "background2"
+        | Text2Theme -> "text2"
+
+    let private themeColorKindOfStr (s: string) : ThemeColorKind =
+        match s with
+        | "dark1" -> Dark1Theme
+        | "light1" -> Light1Theme
+        | "dark2" -> Dark2Theme
+        | "light2" -> Light2Theme
+        | "accent1" -> Accent1Theme
+        | "accent2" -> Accent2Theme
+        | "accent3" -> Accent3Theme
+        | "accent4" -> Accent4Theme
+        | "accent5" -> Accent5Theme
+        | "accent6" -> Accent6Theme
+        | "hyperlink" -> HyperlinkTheme
+        | "followedHyperlink" -> FollowedHyperlinkTheme
+        | "background1" -> Background1Theme
+        | "text1" -> Text1Theme
+        | "background2" -> Background2Theme
+        | _ -> Text2Theme
+
+    /// Same `"theme:<kind>:<fallbackHex>:<tint>:<shade>"` string encoding `Xml.fs`'s own
+    /// `colorToStr` uses, for the same reason (a single JSON string value, matching how
+    /// `color`/`shading`/`cellShading` are already plain strings in this surface).
     let private colorToStr (c: Color) : string =
         match c with
         | Rgb(r, g, b) -> sprintf "%02X%02X%02X" r g b
         | Auto -> "auto"
+        | Theme(kind, (r, g, b), tint, shade) ->
+            sprintf "theme:%s:%02X%02X%02X:%s:%s" (themeColorKindToStr kind) r g b (tint |> Option.map string |> Option.defaultValue "") (shade |> Option.map string |> Option.defaultValue "")
 
     let private colorOfStr (s: string) : Color =
-        if String.Equals(s, "auto", StringComparison.OrdinalIgnoreCase) then
+        if s.StartsWith("theme:") then
+            match s.Split(':') with
+            | [| _; kind; hex; tintStr; shadeStr |] ->
+                let n = Convert.ToInt32(hex, 16)
+                let rgb = byte ((n >>> 16) &&& 0xFF), byte ((n >>> 8) &&& 0xFF), byte (n &&& 0xFF)
+                let tint = if tintStr = "" then None else Some(float tintStr)
+                let shade = if shadeStr = "" then None else Some(float shadeStr)
+                Theme(themeColorKindOfStr kind, rgb, tint, shade)
+            | _ -> Auto
+        elif String.Equals(s, "auto", StringComparison.OrdinalIgnoreCase) then
             Auto
         else
             let n = Convert.ToInt32(s, 16)
@@ -387,7 +439,8 @@ module Json =
               "verticalMerge", p.VerticalMerge |> Option.map (function RestartMerge -> jstr "restart" | ContinueMerge -> jstr "continue")
               "shading", p.Shading |> Option.map (colorToStr >> jstr)
               "borders", p.Borders |> Option.map tableBordersToJson
-              "width", p.Width |> Option.map jnum ]
+              "width", p.Width |> Option.map jnum
+              "margins", p.Margins |> Option.map cellMarginsToJson ]
         :> JsonNode
 
     let private tableCellPropsOfJson (o: JsonObject) : TableCellProps =
@@ -395,7 +448,8 @@ module Json =
           VerticalMerge = str "verticalMerge" o |> Option.map (fun s -> if s = "continue" then ContinueMerge else RestartMerge)
           Shading = str "shading" o |> Option.map colorOfStr
           Borders = prop "borders" o |> Option.map tableBordersOfJson
-          Width = num "width" o }
+          Width = num "width" o
+          Margins = prop "margins" o |> Option.map cellMarginsOfJson }
 
     // `inlineToJson`/`inlineOfJson` need `blockToJson`/`blockOfJson` (a `Footnote`/
     // `Endnote`'s own body is a `Block list`), which need `paragraphToJson`/
@@ -423,6 +477,8 @@ module Json =
             :> JsonNode
         | Bookmark(name, content) ->
             obj_ [ "bookmark", Some(obj_ [ "name", Some(jstr name); "content", Some(JsonArray(content |> List.map inlineToJson |> Array.ofList)) ] :> JsonNode) ] :> JsonNode
+        | BookmarkRangeStart name -> obj_ [ "bookmarkRangeStart", Some(jstr name) ] :> JsonNode
+        | BookmarkRangeEnd name -> obj_ [ "bookmarkRangeEnd", Some(jstr name) ] :> JsonNode
         | Comment(author, initials, date, text, content) ->
             obj_
                 [ "comment",
@@ -464,6 +520,10 @@ module Json =
             elif not (isNull o.["bookmark"]) then
                 let b = o.["bookmark"].AsObject()
                 Bookmark(str "name" b |> Option.get, arr "content" b |> List.map inlineOfJson)
+            elif not (isNull o.["bookmarkRangeStart"]) then
+                BookmarkRangeStart(o.["bookmarkRangeStart"].GetValue<string>())
+            elif not (isNull o.["bookmarkRangeEnd"]) then
+                BookmarkRangeEnd(o.["bookmarkRangeEnd"].GetValue<string>())
             elif not (isNull o.["comment"]) then
                 let c = o.["comment"].AsObject()
                 Comment(str "author" c |> Option.get, str "initials" c, str "date" c |> Option.map DateTime.Parse, str "text" c |> Option.get, arr "content" c |> List.map inlineOfJson)
@@ -599,6 +659,44 @@ module Json =
         let variant (name: string) = match o.[name] with null -> None | n -> Some(n.AsArray() |> Seq.map blockOfJson |> List.ofSeq)
         { Default = variant "default"; First = variant "first"; Even = variant "even" }
 
+    let private numberFormatKindToJson (k: NumberFormatKind) : JsonNode =
+        match k with
+        | BulletFormat(glyph, font) -> obj_ [ "bullet", Some(obj_ [ "glyph", Some(jint (int glyph)); "font", Some(jstr font) ] :> JsonNode) ] :> JsonNode
+        | OtherFormat raw -> obj_ [ "other", Some(jstr raw) ] :> JsonNode
+        | other -> jstr (sprintf "%A" other)
+
+    let private numberFormatKindOfJson (n: JsonNode) : NumberFormatKind =
+        match n with
+        | :? JsonValue as v ->
+            match v.GetValue<string>() with
+            | "LowerLetterFormat" -> LowerLetterFormat
+            | "UpperLetterFormat" -> UpperLetterFormat
+            | "LowerRomanFormat" -> LowerRomanFormat
+            | "UpperRomanFormat" -> UpperRomanFormat
+            | _ -> DecimalFormat
+        | _ ->
+            let o = n.AsObject()
+
+            if not (isNull o.["bullet"]) then
+                let b = o.["bullet"].AsObject()
+                BulletFormat(char (intg "glyph" b |> Option.get), str "font" b |> Option.get)
+            elif not (isNull o.["other"]) then
+                OtherFormat(str "other" o |> Option.get)
+            else
+                DecimalFormat
+
+    let private noteNumberingSettingsToJson (s: NoteNumberingSettings) : JsonNode =
+        obj_ [ "format", Some(numberFormatKindToJson s.Format); "startAt", s.StartAt |> Option.map jint; "restart", Some(jstr (sprintf "%A" s.Restart)) ] :> JsonNode
+
+    let private noteNumberingSettingsOfJson (o: JsonObject) : NoteNumberingSettings =
+        { Format = prop "format" o |> Option.map numberFormatKindOfJson |> Option.defaultValue DecimalFormat
+          StartAt = intg "startAt" o
+          Restart =
+            match str "restart" o with
+            | Some "RestartEachSection" -> RestartEachSection
+            | Some "RestartEachPage" -> RestartEachPage
+            | _ -> ContinuousRestart }
+
     let private sectionPropertiesToJson (s: SectionProperties) : JsonNode =
         obj_
             [ "pageSize", Some(pageSizeToJson s.PageSize)
@@ -608,7 +706,9 @@ module Json =
               "footer", s.Footer |> Option.map headerFooterSetToJson
               "pageNumberStart", s.PageNumberStart |> Option.map jint
               "columns", Some(jint s.Columns)
-              "breakType", Some(jstr (sprintf "%A" s.BreakType)) ]
+              "breakType", Some(jstr (sprintf "%A" s.BreakType))
+              "footnoteNumbering", s.FootnoteNumbering |> Option.map noteNumberingSettingsToJson
+              "endnoteNumbering", s.EndnoteNumbering |> Option.map noteNumberingSettingsToJson ]
         :> JsonNode
 
     let private sectionBreakTypeOfJson (s: string option) : SectionBreakType =
@@ -626,7 +726,9 @@ module Json =
           Footer = prop "footer" o |> Option.map headerFooterSetOfJson
           PageNumberStart = intg "pageNumberStart" o
           Columns = intg "columns" o |> Option.defaultValue 1
-          BreakType = sectionBreakTypeOfJson (str "breakType" o) }
+          BreakType = sectionBreakTypeOfJson (str "breakType" o)
+          FootnoteNumbering = prop "footnoteNumbering" o |> Option.map noteNumberingSettingsOfJson
+          EndnoteNumbering = prop "endnoteNumbering" o |> Option.map noteNumberingSettingsOfJson }
 
     let private sectionToJson (s: Section) : JsonNode =
         obj_ [ "pageSetup", Some(sectionPropertiesToJson s.Properties); "body", Some(JsonArray(s.Body |> List.map blockToJson |> Array.ofList)) ] :> JsonNode
@@ -656,31 +758,6 @@ module Json =
           RunFormat = prop "runStyle" o |> Option.map runStyleOfJson
           ParaFormat = prop "paragraphFormat" o |> Option.map paragraphFormatOfJson }
 
-    let private numberFormatKindToJson (k: NumberFormatKind) : JsonNode =
-        match k with
-        | BulletFormat(glyph, font) -> obj_ [ "bullet", Some(obj_ [ "glyph", Some(jint (int glyph)); "font", Some(jstr font) ] :> JsonNode) ] :> JsonNode
-        | OtherFormat raw -> obj_ [ "other", Some(jstr raw) ] :> JsonNode
-        | other -> jstr (sprintf "%A" other)
-
-    let private numberFormatKindOfJson (n: JsonNode) : NumberFormatKind =
-        match n with
-        | :? JsonValue as v ->
-            match v.GetValue<string>() with
-            | "LowerLetterFormat" -> LowerLetterFormat
-            | "UpperLetterFormat" -> UpperLetterFormat
-            | "LowerRomanFormat" -> LowerRomanFormat
-            | "UpperRomanFormat" -> UpperRomanFormat
-            | _ -> DecimalFormat
-        | _ ->
-            let o = n.AsObject()
-
-            if not (isNull o.["bullet"]) then
-                let b = o.["bullet"].AsObject()
-                BulletFormat(char (intg "glyph" b |> Option.get), str "font" b |> Option.get)
-            elif not (isNull o.["other"]) then
-                OtherFormat(str "other" o |> Option.get)
-            else
-                DecimalFormat
 
     let private listLevelToJson (l: ListLevel) : JsonNode =
         obj_
@@ -765,19 +842,36 @@ module Json =
               "borders", d.Borders |> Option.map tableBordersToJson
               "wholeTable", tableStyleRegionToJson d.WholeTable
               "firstRow", tableStyleRegionToJson d.FirstRow
-              "bandedRow", tableStyleRegionToJson d.BandedRow ]
+              "lastRow", tableStyleRegionToJson d.LastRow
+              "firstColumn", tableStyleRegionToJson d.FirstColumn
+              "lastColumn", tableStyleRegionToJson d.LastColumn
+              "bandedRow", tableStyleRegionToJson d.BandedRow
+              "bandedColumn", tableStyleRegionToJson d.BandedColumn
+              "northEastCell", tableStyleRegionToJson d.NorthEastCell
+              "northWestCell", tableStyleRegionToJson d.NorthWestCell
+              "southEastCell", tableStyleRegionToJson d.SouthEastCell
+              "southWestCell", tableStyleRegionToJson d.SouthWestCell ]
         :> JsonNode
 
     let private tableStyleDefinitionOfJson (n: JsonNode) : TableStyleDefinition =
         let o = n.AsObject()
+        let regionOf name = prop name o |> Option.map tableStyleRegionOfJson |> Option.defaultValue TableStyleRegion.None
 
         { Id = str "id" o |> Option.get
           Name = str "name" o |> Option.get
           BasedOn = str "basedOn" o
           Borders = prop "borders" o |> Option.map tableBordersOfJson
-          WholeTable = prop "wholeTable" o |> Option.map tableStyleRegionOfJson |> Option.defaultValue TableStyleRegion.None
-          FirstRow = prop "firstRow" o |> Option.map tableStyleRegionOfJson |> Option.defaultValue TableStyleRegion.None
-          BandedRow = prop "bandedRow" o |> Option.map tableStyleRegionOfJson |> Option.defaultValue TableStyleRegion.None }
+          WholeTable = regionOf "wholeTable"
+          FirstRow = regionOf "firstRow"
+          LastRow = regionOf "lastRow"
+          FirstColumn = regionOf "firstColumn"
+          LastColumn = regionOf "lastColumn"
+          BandedRow = regionOf "bandedRow"
+          BandedColumn = regionOf "bandedColumn"
+          NorthEastCell = regionOf "northEastCell"
+          NorthWestCell = regionOf "northWestCell"
+          SouthEastCell = regionOf "southEastCell"
+          SouthWestCell = regionOf "southWestCell" }
 
     // --- Top level ------------------------------------------------------------------------
 

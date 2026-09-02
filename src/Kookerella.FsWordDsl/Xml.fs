@@ -16,13 +16,66 @@ module Xml =
     let private attr (name: string) (v: 'a) = XAttribute(xn name, box v)
     let private attrOpt (name: string) (o: 'a option) : XAttribute list = o |> Option.map (fun v -> attr name v) |> Option.toList
 
+    let private themeColorKindToStr (k: ThemeColorKind) : string =
+        match k with
+        | Dark1Theme -> "dark1"
+        | Light1Theme -> "light1"
+        | Dark2Theme -> "dark2"
+        | Light2Theme -> "light2"
+        | Accent1Theme -> "accent1"
+        | Accent2Theme -> "accent2"
+        | Accent3Theme -> "accent3"
+        | Accent4Theme -> "accent4"
+        | Accent5Theme -> "accent5"
+        | Accent6Theme -> "accent6"
+        | HyperlinkTheme -> "hyperlink"
+        | FollowedHyperlinkTheme -> "followedHyperlink"
+        | Background1Theme -> "background1"
+        | Text1Theme -> "text1"
+        | Background2Theme -> "background2"
+        | Text2Theme -> "text2"
+
+    let private themeColorKindOfStr (s: string) : ThemeColorKind =
+        match s with
+        | "dark1" -> Dark1Theme
+        | "light1" -> Light1Theme
+        | "dark2" -> Dark2Theme
+        | "light2" -> Light2Theme
+        | "accent1" -> Accent1Theme
+        | "accent2" -> Accent2Theme
+        | "accent3" -> Accent3Theme
+        | "accent4" -> Accent4Theme
+        | "accent5" -> Accent5Theme
+        | "accent6" -> Accent6Theme
+        | "hyperlink" -> HyperlinkTheme
+        | "followedHyperlink" -> FollowedHyperlinkTheme
+        | "background1" -> Background1Theme
+        | "text1" -> Text1Theme
+        | "background2" -> Background2Theme
+        | _ -> Text2Theme
+
+    /// `Rgb`/`Auto` round-trip as before (a bare hex string or `"auto"`); `Theme` is
+    /// `"theme:<kind>:<fallbackHex>:<tint>:<shade>"` - `tint`/`shade` are empty when
+    /// `None`, matching the `"other:"` escape-hatch prefix convention used elsewhere in
+    /// this file (e.g. `borderLineToStr`).
     let private colorToStr (c: Color) : string =
         match c with
         | Rgb(r, g, b) -> sprintf "%02X%02X%02X" r g b
         | Auto -> "auto"
+        | Theme(kind, (r, g, b), tint, shade) ->
+            sprintf "theme:%s:%02X%02X%02X:%s:%s" (themeColorKindToStr kind) r g b (tint |> Option.map string |> Option.defaultValue "") (shade |> Option.map string |> Option.defaultValue "")
 
     let private colorOfStr (s: string) : Color =
-        if String.Equals(s, "auto", StringComparison.OrdinalIgnoreCase) then
+        if s.StartsWith("theme:") then
+            match s.Split(':') with
+            | [| _; kind; hex; tintStr; shadeStr |] ->
+                let n = Convert.ToInt32(hex, 16)
+                let rgb = byte ((n >>> 16) &&& 0xFF), byte ((n >>> 8) &&& 0xFF), byte (n &&& 0xFF)
+                let tint = if tintStr = "" then None else Some(float tintStr)
+                let shade = if shadeStr = "" then None else Some(float shadeStr)
+                Theme(themeColorKindOfStr kind, rgb, tint, shade)
+            | _ -> Auto
+        elif String.Equals(s, "auto", StringComparison.OrdinalIgnoreCase) then
             Auto
         else
             let n = Convert.ToInt32(s, 16)
@@ -371,13 +424,15 @@ module Xml =
             attrOpt "verticalMerge" (p.VerticalMerge |> Option.map (function RestartMerge -> "restart" | ContinueMerge -> "continue")),
             attrOpt "shading" (p.Shading |> Option.map colorToStr),
             attrOpt "width" p.Width,
-            (p.Borders |> Option.map tableBordersToXml |> Option.toList)
+            (p.Borders |> Option.map tableBordersToXml |> Option.toList),
+            (p.Margins |> Option.map cellMarginsToXml |> Option.toList)
         )
 
     let private tableCellPropsOfXml (el: XElement) : TableCellProps =
         { GridSpan = strAttr "gridSpan" el |> Option.map int
           VerticalMerge = strAttr "verticalMerge" el |> Option.map (fun s -> if s = "continue" then ContinueMerge else RestartMerge)
           Shading = strAttr "shading" el |> Option.map colorOfStr
+          Margins = el.Element(xn "cellMargins") |> Option.ofObj |> Option.map cellMarginsOfXml
           Borders = el.Element(xn "tableBorders") |> Option.ofObj |> Option.map tableBordersOfXml
           Width = strAttr "width" el |> Option.map float }
 
@@ -396,6 +451,8 @@ module Xml =
         | Hyperlink(target, runs, tooltip) ->
             XElement(xn "hyperlink", attrOpt "tooltip" tooltip, hyperlinkTargetToXml target, XElement(xn "content", runs |> List.map inlineToXml))
         | Bookmark(name, content) -> XElement(xn "bookmark", attr "name" name, content |> List.map inlineToXml)
+        | BookmarkRangeStart name -> XElement(xn "bookmarkRangeStart", attr "name" name)
+        | BookmarkRangeEnd name -> XElement(xn "bookmarkRangeEnd", attr "name" name)
         | Comment(author, initials, date, text, content) ->
             XElement(
                 xn "comment",
@@ -421,6 +478,8 @@ module Xml =
             let content = el.Element(xn "content").Elements() |> Seq.map inlineOfXml |> List.ofSeq
             Hyperlink(target, content, strAttr "tooltip" el)
         | "bookmark" -> Bookmark(el.Attribute(xn "name").Value, el.Elements() |> Seq.map inlineOfXml |> List.ofSeq)
+        | "bookmarkRangeStart" -> BookmarkRangeStart(el.Attribute(xn "name").Value)
+        | "bookmarkRangeEnd" -> BookmarkRangeEnd(el.Attribute(xn "name").Value)
         | "comment" ->
             let content = el.Element(xn "content").Elements() |> Seq.map inlineOfXml |> List.ofSeq
             let text = el.Element(xn "text").Value
@@ -538,6 +597,34 @@ module Xml =
         let variant n = el.Element(xn n) |> Option.ofObj |> Option.map (fun e -> e.Elements() |> Seq.map blockOfXml |> List.ofSeq)
         { Default = variant "default"; First = variant "first"; Even = variant "even" }
 
+    let private numberFormatKindToXml (k: NumberFormatKind) : XElement =
+        match k with
+        | BulletFormat(glyph, font) -> XElement(xn "format", attr "kind" "bullet", attr "glyph" (int glyph), attr "font" font)
+        | OtherFormat raw -> XElement(xn "format", attr "kind" "other", attr "raw" raw)
+        | other -> XElement(xn "format", attr "kind" (sprintf "%A" other))
+
+    let private numberFormatKindOfXml (el: XElement) : NumberFormatKind =
+        match el.Attribute(xn "kind").Value with
+        | "bullet" -> BulletFormat(char (int (el.Attribute(xn "glyph").Value)), el.Attribute(xn "font").Value)
+        | "other" -> OtherFormat(el.Attribute(xn "raw").Value)
+        | "LowerLetterFormat" -> LowerLetterFormat
+        | "UpperLetterFormat" -> UpperLetterFormat
+        | "LowerRomanFormat" -> LowerRomanFormat
+        | "UpperRomanFormat" -> UpperRomanFormat
+        | _ -> DecimalFormat
+
+    let private noteNumberingSettingsToXml (name: string) (s: NoteNumberingSettings) : XElement =
+        XElement(xn name, attrOpt "startAt" s.StartAt, attr "restart" (sprintf "%A" s.Restart), numberFormatKindToXml s.Format)
+
+    let private noteNumberingSettingsOfXml (el: XElement) : NoteNumberingSettings =
+        { Format = numberFormatKindOfXml (el.Element(xn "format"))
+          StartAt = strAttr "startAt" el |> Option.map int
+          Restart =
+            match strAttr "restart" el with
+            | Some "RestartEachSection" -> RestartEachSection
+            | Some "RestartEachPage" -> RestartEachPage
+            | _ -> ContinuousRestart }
+
     let private sectionPropertiesToXml (s: SectionProperties) : XElement =
         XElement(
             xn "pageSetup",
@@ -548,7 +635,9 @@ module Xml =
             pageSizeToXml s.PageSize,
             pageMarginsToXml s.Margins,
             (s.Header |> Option.map (headerFooterSetToXml "header") |> Option.toList),
-            (s.Footer |> Option.map (headerFooterSetToXml "footer") |> Option.toList)
+            (s.Footer |> Option.map (headerFooterSetToXml "footer") |> Option.toList),
+            (s.FootnoteNumbering |> Option.map (noteNumberingSettingsToXml "footnoteNumbering") |> Option.toList),
+            (s.EndnoteNumbering |> Option.map (noteNumberingSettingsToXml "endnoteNumbering") |> Option.toList)
         )
 
     let private sectionBreakTypeOfXml (s: string option) : SectionBreakType =
@@ -566,7 +655,9 @@ module Xml =
           Footer = el.Element(xn "footer") |> Option.ofObj |> Option.map headerFooterSetOfXml
           PageNumberStart = strAttr "pageNumberStart" el |> Option.map int
           Columns = int (el.Attribute(xn "columns").Value)
-          BreakType = sectionBreakTypeOfXml (strAttr "breakType" el) }
+          BreakType = sectionBreakTypeOfXml (strAttr "breakType" el)
+          FootnoteNumbering = el.Element(xn "footnoteNumbering") |> Option.ofObj |> Option.map noteNumberingSettingsOfXml
+          EndnoteNumbering = el.Element(xn "endnoteNumbering") |> Option.ofObj |> Option.map noteNumberingSettingsOfXml }
 
     let private sectionToXml (s: Section) : XElement =
         XElement(xn "section", sectionPropertiesToXml s.Properties, XElement(xn "body", s.Body |> List.map blockToXml))
@@ -595,22 +686,6 @@ module Xml =
           BasedOn = strAttr "basedOn" el
           RunFormat = el.Element(xn "runStyle") |> Option.ofObj |> Option.map runStyleOfXml
           ParaFormat = el.Element(xn "paragraphFormat") |> Option.ofObj |> Option.map paragraphFormatOfXml }
-
-    let private numberFormatKindToXml (k: NumberFormatKind) : XElement =
-        match k with
-        | BulletFormat(glyph, font) -> XElement(xn "format", attr "kind" "bullet", attr "glyph" (int glyph), attr "font" font)
-        | OtherFormat raw -> XElement(xn "format", attr "kind" "other", attr "raw" raw)
-        | other -> XElement(xn "format", attr "kind" (sprintf "%A" other))
-
-    let private numberFormatKindOfXml (el: XElement) : NumberFormatKind =
-        match el.Attribute(xn "kind").Value with
-        | "bullet" -> BulletFormat(char (int (el.Attribute(xn "glyph").Value)), el.Attribute(xn "font").Value)
-        | "other" -> OtherFormat(el.Attribute(xn "raw").Value)
-        | "LowerLetterFormat" -> LowerLetterFormat
-        | "UpperLetterFormat" -> UpperLetterFormat
-        | "LowerRomanFormat" -> LowerRomanFormat
-        | "UpperRomanFormat" -> UpperRomanFormat
-        | _ -> DecimalFormat
 
     let private listLevelToXml (l: ListLevel) : XElement =
         XElement(xn "level", numberFormatKindToXml l.Format, attr "text" l.Text, attrOpt "indentLeft" l.IndentLeft, attrOpt "hangingIndent" l.HangingIndent, attrOpt "startAt" l.StartAt)
@@ -668,17 +743,35 @@ module Xml =
             (d.Borders |> Option.map tableBordersToXml |> Option.toList),
             tableStyleRegionToXml "wholeTable" d.WholeTable,
             tableStyleRegionToXml "firstRow" d.FirstRow,
-            tableStyleRegionToXml "bandedRow" d.BandedRow
+            tableStyleRegionToXml "lastRow" d.LastRow,
+            tableStyleRegionToXml "firstColumn" d.FirstColumn,
+            tableStyleRegionToXml "lastColumn" d.LastColumn,
+            tableStyleRegionToXml "bandedRow" d.BandedRow,
+            tableStyleRegionToXml "bandedColumn" d.BandedColumn,
+            tableStyleRegionToXml "northEastCell" d.NorthEastCell,
+            tableStyleRegionToXml "northWestCell" d.NorthWestCell,
+            tableStyleRegionToXml "southEastCell" d.SouthEastCell,
+            tableStyleRegionToXml "southWestCell" d.SouthWestCell
         )
 
     let private tableStyleDefinitionOfXml (el: XElement) : TableStyleDefinition =
+        let regionOf name = el.Element(xn name) |> Option.ofObj |> Option.map tableStyleRegionOfXml |> Option.defaultValue TableStyleRegion.None
+
         { Id = el.Attribute(xn "id").Value
           Name = el.Attribute(xn "name").Value
           BasedOn = strAttr "basedOn" el
           Borders = el.Element(xn "tableBorders") |> Option.ofObj |> Option.map tableBordersOfXml
-          WholeTable = el.Element(xn "wholeTable") |> Option.ofObj |> Option.map tableStyleRegionOfXml |> Option.defaultValue TableStyleRegion.None
-          FirstRow = el.Element(xn "firstRow") |> Option.ofObj |> Option.map tableStyleRegionOfXml |> Option.defaultValue TableStyleRegion.None
-          BandedRow = el.Element(xn "bandedRow") |> Option.ofObj |> Option.map tableStyleRegionOfXml |> Option.defaultValue TableStyleRegion.None }
+          WholeTable = regionOf "wholeTable"
+          FirstRow = regionOf "firstRow"
+          LastRow = regionOf "lastRow"
+          FirstColumn = regionOf "firstColumn"
+          LastColumn = regionOf "lastColumn"
+          BandedRow = regionOf "bandedRow"
+          BandedColumn = regionOf "bandedColumn"
+          NorthEastCell = regionOf "northEastCell"
+          NorthWestCell = regionOf "northWestCell"
+          SouthEastCell = regionOf "southEastCell"
+          SouthWestCell = regionOf "southWestCell" }
 
     // --- Top level ------------------------------------------------------------------------
 

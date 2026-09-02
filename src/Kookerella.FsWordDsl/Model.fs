@@ -36,12 +36,26 @@ module Model =
         | PageBreak
         | Image of ImageEntry
         | Hyperlink of target: HyperlinkTarget * runs: Inline list * tooltip: string option
-        /// Scoped to within a single paragraph in this DSL - a bookmark spanning multiple
-        /// paragraphs in a foreign file is a documented gap (see MAPPING.md).
+        /// Wraps its own content, scoped to within a single paragraph - the ergonomic,
+        /// common case. A bookmark spanning more than one paragraph is `BookmarkRangeStart`/
+        /// `BookmarkRangeEnd` instead - two independent markers a caller places directly in
+        /// separate `Paragraph.Inlines` lists (see those cases' own doc comments).
         | Bookmark of name: string * content: Inline list
+        /// A bookmark boundary marker usable on its own, for a bookmark spanning more than
+        /// one paragraph - `name` must match its corresponding `BookmarkRangeEnd`
+        /// elsewhere in the same document (`Writer` assigns the matching OOXML `w:id`
+        /// automatically, same as `Bookmark` does). Order matters: `Reader` treats a
+        /// `BookmarkRangeStart` with no matching `BookmarkRangeEnd` later in the body as
+        /// unterminated and drops it, same "best-effort on a foreign file" posture the rest
+        /// of `Reader` takes.
+        | BookmarkRangeStart of name: string
+        | BookmarkRangeEnd of name: string
         /// `Date = None` is written as "now" at write time - Word records a comment's own
         /// timestamp, this DSL doesn't require the caller to supply one. Scoped to within a
-        /// single paragraph, same documented gap as `Bookmark`.
+        /// single paragraph - a comment spanning more than one paragraph is a documented
+        /// gap (see MAPPING.md; unlike `Bookmark`, splitting `Comment` the same way
+        /// `BookmarkRangeStart`/`End` do would also need to relocate its metadata, which
+        /// lives wrapped in this same case today).
         | Comment of author: string * initials: string option * date: DateTime option * text: string * content: Inline list
         /// A "simple field" (`w:fldSimple`) - raw field instruction text (e.g. `"PAGE"`,
         /// `"DATE \\@ \"MMMM d, yyyy\""`) plus the cached display text Word showed before
@@ -141,7 +155,12 @@ module Model =
           Footer: HeaderFooterSet option
           PageNumberStart: int option
           Columns: int
-          BreakType: SectionBreakType }
+          BreakType: SectionBreakType
+          /// `None` is Word's own default (continuous decimal numbering starting at 1,
+          /// straight through the document) - see `PageSetup.NoteNumberingSettings`'s own
+          /// doc comment.
+          FootnoteNumbering: NoteNumberingSettings option
+          EndnoteNumbering: NoteNumberingSettings option }
 
         static member Default =
             { PageSize = Letter
@@ -151,7 +170,9 @@ module Model =
               Footer = None
               PageNumberStart = None
               Columns = 1
-              BreakType = NextPageBreak }
+              BreakType = NextPageBreak
+              FootnoteNumbering = None
+              EndnoteNumbering = None }
 
     and Section = { Body: Block list; Properties: SectionProperties }
 

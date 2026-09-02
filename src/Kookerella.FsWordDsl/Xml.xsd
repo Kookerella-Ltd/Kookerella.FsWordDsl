@@ -26,7 +26,15 @@
       <xs:element name="tableBorders" type="tableBordersType" minOccurs="0" />
       <xs:element name="wholeTable" type="tableStyleRegionType" minOccurs="0" />
       <xs:element name="firstRow" type="tableStyleRegionType" minOccurs="0" />
+      <xs:element name="lastRow" type="tableStyleRegionType" minOccurs="0" />
+      <xs:element name="firstColumn" type="tableStyleRegionType" minOccurs="0" />
+      <xs:element name="lastColumn" type="tableStyleRegionType" minOccurs="0" />
       <xs:element name="bandedRow" type="tableStyleRegionType" minOccurs="0" />
+      <xs:element name="bandedColumn" type="tableStyleRegionType" minOccurs="0" />
+      <xs:element name="northEastCell" type="tableStyleRegionType" minOccurs="0" />
+      <xs:element name="northWestCell" type="tableStyleRegionType" minOccurs="0" />
+      <xs:element name="southEastCell" type="tableStyleRegionType" minOccurs="0" />
+      <xs:element name="southWestCell" type="tableStyleRegionType" minOccurs="0" />
     </xs:sequence>
     <xs:attribute name="id" type="xs:string" use="required" />
     <xs:attribute name="name" type="xs:string" use="required" />
@@ -79,11 +87,21 @@
       <xs:element name="margins" type="marginsType" />
       <xs:element name="header" type="headerFooterSetType" minOccurs="0" />
       <xs:element name="footer" type="headerFooterSetType" minOccurs="0" />
+      <xs:element name="footnoteNumbering" type="noteNumberingSettingsType" minOccurs="0" />
+      <xs:element name="endnoteNumbering" type="noteNumberingSettingsType" minOccurs="0" />
     </xs:sequence>
     <xs:attribute name="orientation" type="xs:string" use="required" />
     <xs:attribute name="pageNumberStart" type="xs:int" />
     <xs:attribute name="columns" type="xs:int" use="required" />
     <xs:attribute name="breakType" type="xs:string" use="required" />
+  </xs:complexType>
+
+  <xs:complexType name="noteNumberingSettingsType">
+    <xs:sequence>
+      <xs:element name="format" type="numberFormatType" />
+    </xs:sequence>
+    <xs:attribute name="startAt" type="xs:int" />
+    <xs:attribute name="restart" type="xs:string" use="required" />
   </xs:complexType>
 
   <xs:complexType name="pageSizeType">
@@ -124,6 +142,8 @@
         <xs:element name="image" type="imageType" />
         <xs:element name="hyperlink" type="hyperlinkType" />
         <xs:element name="bookmark" type="bookmarkType" />
+        <xs:element name="bookmarkRangeStart" type="bookmarkRangeMarkerType" />
+        <xs:element name="bookmarkRangeEnd" type="bookmarkRangeMarkerType" />
         <xs:element name="comment" type="commentType" />
         <xs:element name="field" type="fieldType" />
         <xs:element name="footnote" type="noteType" />
@@ -133,6 +153,12 @@
     <xs:attribute name="styleId" type="xs:string" />
     <xs:attribute name="numId" type="xs:int" />
     <xs:attribute name="level" type="xs:int" />
+  </xs:complexType>
+
+  <!-- A cross-paragraph bookmark boundary marker (`Inline.BookmarkRangeStart`/`End`) -
+       usable on its own, unlike `bookmarkType` (which wraps its own content). -->
+  <xs:complexType name="bookmarkRangeMarkerType">
+    <xs:attribute name="name" type="xs:string" use="required" />
   </xs:complexType>
 
   <xs:complexType name="emptyType" />
@@ -359,6 +385,7 @@
   <xs:complexType name="cellPropsType">
     <xs:sequence>
       <xs:element name="tableBorders" type="tableBordersType" minOccurs="0" />
+      <xs:element name="cellMargins" type="cellMarginsType" minOccurs="0" />
     </xs:sequence>
     <xs:attribute name="gridSpan" type="xs:int" />
     <xs:attribute name="verticalMerge" type="xs:string" />

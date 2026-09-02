@@ -67,6 +67,24 @@ module Builders =
                 HangingIndent = Some 18.0
                 StartAt = Some 1 } ] }
 
+    /// A multi-level decimal-numbered outline list ("1.", "1.1.", "1.1.1.", ...) -
+    /// `Model.Paragraph.Numbering`'s own doc comment already notes `NumberingDefinition.
+    /// Levels` supports several levels; this is just the common, correctly-linked shape
+    /// (each level's `Text` chains through its ancestors' own counters via consecutive
+    /// `%N` placeholders - hand-authoring that yourself is easy to get subtly wrong, since
+    /// this DSL doesn't validate it, see `ListLevel.Text`'s own doc comment) with
+    /// increasing indentation per level. `levelCount` must be between 1 and 9
+    /// (WordprocessingML's own `w:lvl` range).
+    let multiLevelNumberedListDef (id: int) (levelCount: int) : NumberingDefinition =
+        { Id = id
+          Levels =
+            [ for i in 1..levelCount ->
+                  { Format = DecimalFormat
+                    Text = ([ 1..i ] |> List.map (sprintf "%%%d") |> String.concat ".") + "."
+                    IndentLeft = Some(36.0 * float i)
+                    HangingIndent = Some 18.0
+                    StartAt = Some 1 } ] }
+
 /// Smart constructors, as members with real optional parameters - plain `let` bindings
 /// can't have optional parameters in F# (member-only), same reason `SheetDsl` exists.
 /// `open type Kookerella.FsWordDsl.DocumentDsl` (alongside `open Kookerella.FsWordDsl`)

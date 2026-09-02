@@ -35,6 +35,8 @@ module CodeGen =
         match c with
         | Rgb(r, g, b) -> sprintf "Rgb(%duy, %duy, %duy)" r g b
         | Auto -> "Auto"
+        | Theme(kind, (r, g, b), tint, shade) ->
+            sprintf "Theme(%A, (%duy, %duy, %duy), %s, %s)" kind r g b (renderOption string tint) (renderOption string shade)
 
     let private renderHighlight (h: HighlightColor) : string = sprintf "%A" h
     let private renderUnderline (u: UnderlineStyle) : string =
@@ -164,6 +166,8 @@ module CodeGen =
         | Hyperlink(target, runs, tooltip) ->
             sprintf "Hyperlink(%s, %s, %s)" (renderHyperlinkTarget target) (renderList renderInline runs) (renderOption quote tooltip)
         | Bookmark(name, content) -> sprintf "Bookmark(%s, %s)" (quote name) (renderList renderInline content)
+        | BookmarkRangeStart name -> sprintf "BookmarkRangeStart(%s)" (quote name)
+        | BookmarkRangeEnd name -> sprintf "BookmarkRangeEnd(%s)" (quote name)
         | Comment(author, initials, date, text, content) ->
             let dateStr = renderOption (fun (d: System.DateTime) -> sprintf "System.DateTime.Parse(%s)" (quote (d.ToString("o")))) date
             sprintf "Comment(%s, %s, %s, %s, %s)" (quote author) (renderOption quote initials) dateStr (quote text) (renderList renderInline content)
@@ -191,12 +195,13 @@ module CodeGen =
 
     and private renderTableCellProps (p: TableCellProps) : string =
         sprintf
-            "{ GridSpan = %s; VerticalMerge = %s; Shading = %s; Borders = %s; Width = %s }"
+            "{ GridSpan = %s; VerticalMerge = %s; Shading = %s; Borders = %s; Width = %s; Margins = %s }"
             (renderOption string p.GridSpan)
             (renderOption (sprintf "%A") p.VerticalMerge)
             (renderOption renderColor p.Shading)
             (renderOption renderTableBorders p.Borders)
             (renderOption string p.Width)
+            (renderOption renderCellMargins p.Margins)
 
     and private renderTableCell (c: TableCell) : string =
         sprintf "{ Content = %s; Props = %s }" (renderList renderBlock c.Content) (renderTableCellProps c.Props)
@@ -241,9 +246,18 @@ module CodeGen =
             (renderOption (renderList renderBlock) h.First)
             (renderOption (renderList renderBlock) h.Even)
 
+    let private renderNumberFormatKind (k: NumberFormatKind) : string =
+        match k with
+        | BulletFormat(glyph, font) -> sprintf "BulletFormat(char %d, %s)" (int glyph) (quote font)
+        | OtherFormat raw -> sprintf "OtherFormat %s" (quote raw)
+        | other -> sprintf "%A" other
+
+    let private renderNoteNumberingSettings (s: NoteNumberingSettings) : string =
+        sprintf "{ Format = %s; StartAt = %s; Restart = %A }" (renderNumberFormatKind s.Format) (renderOption string s.StartAt) s.Restart
+
     let private renderSectionProperties (s: SectionProperties) : string =
         sprintf
-            "{ PageSize = %s; Orientation = %A; Margins = %s; Header = %s; Footer = %s; PageNumberStart = %s; Columns = %d; BreakType = %A }"
+            "{ PageSize = %s; Orientation = %A; Margins = %s; Header = %s; Footer = %s; PageNumberStart = %s; Columns = %d; BreakType = %A; FootnoteNumbering = %s; EndnoteNumbering = %s }"
             (renderPageSize s.PageSize)
             s.Orientation
             (renderPageMargins s.Margins)
@@ -252,6 +266,8 @@ module CodeGen =
             (renderOption string s.PageNumberStart)
             s.Columns
             s.BreakType
+            (renderOption renderNoteNumberingSettings s.FootnoteNumbering)
+            (renderOption renderNoteNumberingSettings s.EndnoteNumbering)
 
     let private renderSection (s: Section) : string =
         sprintf "{ Body = %s; Properties = %s }" (renderList renderBlock s.Body) (renderSectionProperties s.Properties)
@@ -265,12 +281,6 @@ module CodeGen =
             (renderOption quote d.BasedOn)
             (renderOption renderRunStyle d.RunFormat)
             (renderOption renderParagraphFormat d.ParaFormat)
-
-    let private renderNumberFormatKind (k: NumberFormatKind) : string =
-        match k with
-        | BulletFormat(glyph, font) -> sprintf "BulletFormat(char %d, %s)" (int glyph) (quote font)
-        | OtherFormat raw -> sprintf "OtherFormat %s" (quote raw)
-        | other -> sprintf "%A" other
 
     let private renderListLevel (l: ListLevel) : string =
         sprintf
@@ -296,14 +306,22 @@ module CodeGen =
 
     let private renderTableStyleDefinition (d: TableStyleDefinition) : string =
         sprintf
-            "{ Id = %s; Name = %s; BasedOn = %s; Borders = %s; WholeTable = %s; FirstRow = %s; BandedRow = %s }"
+            "{ Id = %s; Name = %s; BasedOn = %s; Borders = %s; WholeTable = %s; FirstRow = %s; LastRow = %s; FirstColumn = %s; LastColumn = %s; BandedRow = %s; BandedColumn = %s; NorthEastCell = %s; NorthWestCell = %s; SouthEastCell = %s; SouthWestCell = %s }"
             (quote d.Id)
             (quote d.Name)
             (renderOption quote d.BasedOn)
             (renderOption renderTableBorders d.Borders)
             (renderTableStyleRegion d.WholeTable)
             (renderTableStyleRegion d.FirstRow)
+            (renderTableStyleRegion d.LastRow)
+            (renderTableStyleRegion d.FirstColumn)
+            (renderTableStyleRegion d.LastColumn)
             (renderTableStyleRegion d.BandedRow)
+            (renderTableStyleRegion d.BandedColumn)
+            (renderTableStyleRegion d.NorthEastCell)
+            (renderTableStyleRegion d.NorthWestCell)
+            (renderTableStyleRegion d.SouthEastCell)
+            (renderTableStyleRegion d.SouthWestCell)
 
     let private renderDocumentProperties (p: DocumentProperties) : string =
         sprintf

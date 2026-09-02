@@ -7,37 +7,20 @@
         <margins top="72" bottom="72" left="72" right="72" header="36" footer="36" gutter="0" />
       </pageSetup>
       <body>
-        <para>
-          <run>Plain text, </run>
-          <run>
-            <runStyle bold="true" />bold</run>
-          <run>, </run>
-          <run>
-            <runStyle italic="true" />italic</run>
-          <run>, and </run>
-          <run>
-            <runStyle color="FF0000" />colored</run>
+        <para numId="1" level="0">
+          <run>First topic</run>
         </para>
-        <para>
-          <run>
-            <runStyle underline="single" />Underlined</run>
-          <run> and </run>
-          <run>
-            <runStyle strikethrough="true" />struck through</run>
+        <para numId="1" level="1">
+          <run>First subtopic</run>
         </para>
-        <para>
-          <run>
-            <runStyle smallCaps="true" />SMALL CAPS</run>
-          <run> and </run>
-          <run>
-            <runStyle allCaps="true" />ALL CAPS</run>
-          <run> and </run>
-          <run>
-            <runStyle hidden="true" />hidden text</run>
+        <para numId="1" level="2">
+          <run>First sub-subtopic</run>
         </para>
-        <para>
-          <run>
-            <runStyle color="theme:accent1:1F497D:0.2:" />Theme-colored text (Accent1, tinted 20%)</run>
+        <para numId="1" level="1">
+          <run>Second subtopic</run>
+        </para>
+        <para numId="1" level="0">
+          <run>Second topic</run>
         </para>
       </body>
     </section>
@@ -83,4 +66,17 @@
       <runStyle size="10" />
     </style>
   </styles>
+  <numbering>
+    <numberingDef id="1">
+      <level text="%1." indentLeft="36" hangingIndent="18" startAt="1">
+        <format kind="DecimalFormat" />
+      </level>
+      <level text="%1.%2." indentLeft="72" hangingIndent="18" startAt="1">
+        <format kind="DecimalFormat" />
+      </level>
+      <level text="%1.%2.%3." indentLeft="108" hangingIndent="18" startAt="1">
+        <format kind="DecimalFormat" />
+      </level>
+    </numberingDef>
+  </numbering>
 </document>

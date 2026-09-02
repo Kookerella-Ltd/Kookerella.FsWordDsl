@@ -32,7 +32,8 @@ reasoning and what adding either would look like.
   - `Units.fs` - conversions between points/inches/pixels and the physical units
     WordprocessingML uses on the wire (twips for page geometry/spacing, EMU for image
     sizing).
-  - `Styles.fs` - character and paragraph formatting: `Color`, `HighlightColor` (Word's own
+  - `Styles.fs` - character and paragraph formatting: `Color` (`Rgb`, `Auto`, or a
+    theme-relative `Theme` color - see `ThemeColorKind`), `HighlightColor` (Word's own
     fixed highlight palette), `UnderlineStyle`, `RunStyle` (including small caps/all
     caps/hidden text), `ParagraphAlignment`, `Indentation`, `LineSpacingRule`,
     `TabStopAlignment`/`TabLeader`/`TabStop`, `ParagraphFormat` (including paragraph
@@ -42,24 +43,31 @@ reasoning and what adding either would look like.
     inheritance) and a small `BuiltInStyles` catalog (`normal`, `heading1`/`2`/`3`,
     `title`, `listParagraph`, `hyperlinkCharStyle`).
   - `Numbering.fs` - `NumberFormatKind`, `ListLevel`, `NumberingDefinition` for
-    numbered/bulleted lists.
+    numbered/bulleted lists, including multi-level ones (`ListLevel` isn't limited to one
+    per definition - see `Builders.multiLevelNumberedListDef`).
   - `Hyperlinks.fs` - `HyperlinkTarget` (external URL vs. internal bookmark reference).
   - `Protection.fs` - `EditRestriction` and `DocumentProtection`, document-level (Word has
     no per-section equivalent of Excel's per-sheet protection).
-  - `PageSetup.fs` - `PageOrientation`, `PageSize`, `PageMargins`, `SectionBreakType`.
-  - `Tables.fs` - `TableBorders`, `VerticalMergeKind`, `TableCellProps`, `TableStyleRef`,
-    `TableStyleRegion`/`TableStyleDefinition` (custom table style definitions), and
-    `CellMargins` (a table's default cell margins).
+  - `PageSetup.fs` - `PageOrientation`, `PageSize`, `PageMargins`, `SectionBreakType`,
+    `NoteNumberRestart`/`NoteNumberingSettings` (a section's own footnote/endnote
+    numbering).
+  - `Tables.fs` - `TableBorders`, `VerticalMergeKind`, `TableCellProps` (including a
+    per-cell `Margins` override), `TableStyleRef`, `TableStyleRegion`/
+    `TableStyleDefinition` (custom table style definitions - eleven of OOXML's thirteen
+    conditional-formatting regions), and `CellMargins` (shared shape for a table's default
+    margins and a single cell's own override).
   - `Images.fs` - `ImageFormat`, `ImageEntry` (raw file bytes plus an on-page size),
     anchored inline within a run.
   - `DocumentProperties.fs` - `DocumentProperties` (Title, Author, Subject, Keywords,
     Comments, Category, Company) - core document metadata, `Document.Properties`.
   - `Model.fs` - the recursive content model: `Inline` (runs, breaks, images, hyperlinks,
-    bookmarks, comments, simple fields, footnotes/endnotes), `Paragraph`, `Block`
-    (paragraph or table), `TableCell`/`TableRow` (including `RepeatAsHeader`)/`TableEntry`
-    (including `CellMargins`), `HeaderFooterSet`, `SectionProperties` (including
-    `BreakType`), `Section`, `Document` (including `Document.VbaProject`, a macro-enabled
-    document's raw `vbaProject.bin` bytes, `Document.Properties`, and
+    bookmarks - both the single-paragraph `Bookmark` and the cross-paragraph
+    `BookmarkRangeStart`/`End` markers, comments, simple fields, footnotes/endnotes),
+    `Paragraph`, `Block` (paragraph or table), `TableCell`/`TableRow` (including
+    `RepeatAsHeader`)/`TableEntry` (including `CellMargins`), `HeaderFooterSet`,
+    `SectionProperties` (including `BreakType` and `FootnoteNumbering`/
+    `EndnoteNumbering`), `Section`, `Document` (including `Document.VbaProject`, a
+    macro-enabled document's raw `vbaProject.bin` bytes, `Document.Properties`, and
     `Document.TableStyles`).
   - `Xml.fs` / `Xml.xsd` - the XML surface: `Xml.toDocument`/`Xml.ofDocument` translate a
     `Document` to/from an `XElement` tree, and `Xml.schemaSet()` loads the paired schema
@@ -70,11 +78,11 @@ reasoning and what adding either would look like.
     validation is test-suite only, not a public API. See ["## JSON"](#json) below.
   - `Builders.fs` - plain functional constructors (`section`, `document`, `withStyles`,
     `withNumbering`, `withProtection`, `withVbaProject`, `withDocumentProperties`,
-    `withTableStyles`, `bulletListDef`, `numberedListDef`) plus `DocumentDsl` - smart
-    constructors (`run`, `para`, `hyperlink`, `bookmark`, `comment`, `image`, `footnote`,
-    `endnote`, `tableCell`, `tableRow` (with `height`/`repeatAsHeader`), `table` (with
-    `style`/`borders`/`cellMargins`)) with real optional parameters, the Word analog of the
-    Excel repo's `SheetDsl`.
+    `withTableStyles`, `bulletListDef`, `numberedListDef`, `multiLevelNumberedListDef`)
+    plus `DocumentDsl` - smart constructors (`run`, `para`, `hyperlink`, `bookmark`,
+    `comment`, `image`, `footnote`, `endnote`, `tableCell`, `tableRow` (with
+    `height`/`repeatAsHeader`), `table` (with `style`/`borders`/`cellMargins`)) with real
+    optional parameters, the Word analog of the Excel repo's `SheetDsl`.
   - `Interpreter/StyleRegistry.fs` - shared run/paragraph/border/color conversions plus
     `Document.Styles` <-> `styles.xml` (internal).
   - `Interpreter/ImageWriter.fs` / `ImageReader.fs` - an inline image's own DSL <->
@@ -158,8 +166,19 @@ para
         { ParagraphFormat.Default with TabStops = [ { Position = 288.0; Alignment = RightTab; Leader = DotLeader } ] })
 ```
 
+`Color` also accepts a theme-relative token (`Theme`) alongside plain `Rgb`/`Auto` - since
+this DSL has no theme part to resolve it against, real Word does that; `Fallback` is what a
+themeless reader sees instead, the same "always also write a computed value" convention Word
+itself follows:
+
+```fsharp
+run ("Accent-colored text", style = { RunStyle.Default with Color = Some(Theme(Accent1Theme, (0x1Fuy, 0x49uy, 0x7Duy), None, None)) })
+```
+
 Lists use a `(numId, level)` reference on the paragraph, resolved against a
-`NumberingDefinition` attached to the document:
+`NumberingDefinition` attached to the document - `NumberingDefinition.Levels` isn't limited
+to one level, and `multiLevelNumberedListDef` builds the common correctly-linked outline
+shape for you:
 
 ```fsharp
 document
@@ -167,6 +186,13 @@ document
           [ para ([ run "First bullet" ], numbering = (1, 0))
             para ([ run "Second bullet" ], numbering = (1, 0)) ] ]
 |> withNumbering [ bulletListDef 1 ]
+
+document
+    [ section
+          [ para ([ run "First topic" ], numbering = (1, 0))
+            para ([ run "First subtopic" ], numbering = (1, 1))
+            para ([ run "Second topic" ], numbering = (1, 0)) ] ]
+|> withNumbering [ multiLevelNumberedListDef 1 3 ]
 ```
 
 Tables are built from `tableRow`/`tableCell`, with column widths given once for the whole
@@ -188,22 +214,28 @@ independent and combine on the same cell, matching real Word:
 tableCell ([ para [ run "Spans 2 columns" ] ], props = { TableCellProps.Default with GridSpan = Some 2 })
 ```
 
+A cell's own margins override the table's default the same `CellMargins` shape covers both:
+
+```fsharp
+tableCell ([ para [ run "Extra padding" ] ], props = { TableCellProps.Default with Margins = Some { CellMargins.Default with Top = Some 8.0; Bottom = Some 8.0 } })
+```
+
 A custom table style (`TableStyleDefinition`) lives in `Document.TableStyles` and is applied
 by name, the same way a built-in like `"TableGrid"` is - here with a bold white header row on
-a blue background, plus a table-wide default cell margin and a row that repeats on every page:
+a blue background, an italic last row, and alternating row shading, plus a table-wide default
+cell margin and a row that repeats on every page:
 
 ```fsharp
 let corporateStyle: TableStyleDefinition =
-    { Id = "Corporate"
-      Name = "Corporate"
-      BasedOn = None
-      Borders = None
-      WholeTable = TableStyleRegion.None
-      FirstRow =
-        { TableStyleRegion.None with
-            RunFormat = Some { RunStyle.Default with Bold = true; Color = Some Color.white }
-            CellShading = Some(Rgb(0x4Fuy, 0x81uy, 0xBDuy)) }
-      BandedRow = { TableStyleRegion.None with CellShading = Some(Rgb(0xDCuy, 0xE6uy, 0xF1uy)) } }
+    { TableStyleDefinition.Default with
+        Id = "Corporate"
+        Name = "Corporate"
+        FirstRow =
+            { TableStyleRegion.None with
+                RunFormat = Some { RunStyle.Default with Bold = true; Color = Some Color.white }
+                CellShading = Some(Rgb(0x4Fuy, 0x81uy, 0xBDuy)) }
+        LastRow = { TableStyleRegion.None with RunFormat = Some { RunStyle.Default with Italic = true } }
+        BandedRow = { TableStyleRegion.None with CellShading = Some(Rgb(0xDCuy, 0xE6uy, 0xF1uy)) } }
 
 document
     [ section
@@ -216,6 +248,11 @@ document
             ) ] ]
 |> withTableStyles [ corporateStyle ]
 ```
+
+`TableStyleDefinition` also covers `FirstColumn`/`LastColumn`, `BandedColumn`, and the four
+corner cells (`NorthEastCell`/`NorthWestCell`/`SouthEastCell`/`SouthWestCell`) - the two
+regions not modeled are each banding axis's *second* band, since in practice that's just
+`WholeTable`'s own background showing through (see [MAPPING.md](MAPPING.md)).
 
 Sections carry their own page setup - a document is a sequence of `Section`s, mapping 1:1
 onto real Word section breaks. `BreakType` is how a section begins *relative to the
@@ -243,6 +280,16 @@ para
       endnote [ para [ run "See the appendix for the full derivation." ] ] ]
 ```
 
+A section's own footnote/endnote numbering (`w:footnotePr`/`w:endnotePr`) - `None` is Word's
+own default (continuous decimal from 1); here footnotes are lower-roman and restart every
+page, matching a common legal-document convention:
+
+```fsharp
+sectionWith
+    { SectionProperties.Default with FootnoteNumbering = Some { Format = LowerRomanFormat; StartAt = None; Restart = RestartEachPage } }
+    [ para [ run "Body text."; footnote "A footnote numbered i, ii, iii, ... restarting each page." ] ]
+```
+
 Headers and footers are per-section, with `Default`/`First`/`Even` variants (the
 `titlePg`/`evenAndOddHeaders` flags real Word needs are set automatically):
 
@@ -251,11 +298,21 @@ let footer = { HeaderFooterSet.None with Default = Some [ para [ run "Page "; Fi
 sectionWith { SectionProperties.Default with Footer = Some footer } [ para [ run "Body text." ] ]
 ```
 
-Comments and bookmarks wrap inline content directly (scoped to within one paragraph - see
-[MAPPING.md](MAPPING.md)):
+Comments and bookmarks wrap inline content directly (comments are scoped to within one
+paragraph - see [MAPPING.md](MAPPING.md)):
 
 ```fsharp
 para [ comment ([ run "This figure needs review." ], "Please double check the totals.", author = "Alex") ]
+```
+
+A bookmark spanning more than one paragraph uses `BookmarkRangeStart`/`BookmarkRangeEnd`
+instead - two independent markers placed directly in separate paragraphs, sharing a name:
+
+```fsharp
+document
+    [ section
+          [ para [ BookmarkRangeStart "Section2"; run "This paragraph starts the bookmark" ]
+            para [ run "and this one ends it."; BookmarkRangeEnd "Section2" ] ] ]
 ```
 
 Document-level protection, macros, and core properties are all pipe-friendly, same shape as

@@ -112,7 +112,12 @@ let ``BasicParagraphsAndRuns`` () =
                           run " and "
                           run ("ALL CAPS", style = { RunStyle.Default with AllCaps = true })
                           run " and "
-                          run ("hidden text", style = { RunStyle.Default with Hidden = true }) ] ] ]
+                          run ("hidden text", style = { RunStyle.Default with Hidden = true }) ]
+                    para
+                        [ run (
+                              "Theme-colored text (Accent1, tinted 20%)",
+                              style = { RunStyle.Default with Color = Some(Theme(Accent1Theme, (0x1Fuy, 0x49uy, 0x7Duy), Some 0.2, None)) }
+                          ) ] ] ]
 
     verifyScenarioNamed "BasicParagraphsAndRuns" "output.docx" doc
 
@@ -154,13 +159,18 @@ let ``ParagraphFormatting`` () =
             TabStops =
                 [ { Position = 288.0; Alignment = RightTab; Leader = DotLeader } ] }
 
+    let themeShaded =
+        { ParagraphFormat.Default with
+            Shading = Some(Theme(Accent6Theme, (0xF2uy, 0xDCuy, 0xDBuy), None, Some 0.4)) }
+
     let doc =
         document
             [ section
                   [ para ([ run "Centered heading-like text." ], format = centered)
                     para ([ run "An indented, double-spaced paragraph." ], format = indented)
                     para ([ run "A paragraph with top/bottom borders and shading." ], format = bordered)
-                    para ([ run "Introduction"; Tab; run "1" ], format = tabbed) ] ]
+                    para ([ run "Introduction"; Tab; run "1" ], format = tabbed)
+                    para ([ run "A paragraph shaded with a theme color (Accent6, shaded 40%)." ], format = themeShaded) ] ]
 
     verifyScenarioNamed "ParagraphFormatting" "output.docx" doc
 
@@ -187,6 +197,20 @@ let ``NumberedList`` () =
         |> withNumbering [ numberedListDef 1 ]
 
     verifyScenarioNamed "NumberedList" "output.docx" doc
+
+[<Fact>]
+let ``MultiLevelNumberedList`` () =
+    let doc =
+        document
+            [ section
+                  [ para ([ run "First topic" ], numbering = (1, 0))
+                    para ([ run "First subtopic" ], numbering = (1, 1))
+                    para ([ run "First sub-subtopic" ], numbering = (1, 2))
+                    para ([ run "Second subtopic" ], numbering = (1, 1))
+                    para ([ run "Second topic" ], numbering = (1, 0)) ] ]
+        |> withNumbering [ multiLevelNumberedListDef 1 3 ]
+
+    verifyScenarioNamed "MultiLevelNumberedList" "output.docx" doc
 
 [<Fact>]
 let ``Table_Basic`` () =
@@ -294,6 +318,19 @@ let ``Bookmark`` () =
     verifyScenarioNamed "Bookmark" "output.docx" doc
 
 [<Fact>]
+let ``Bookmark_MultiParagraph`` () =
+    let doc =
+        document
+            [ section
+                  [ para [ run "Before the bookmark." ]
+                    para [ BookmarkRangeStart "Section2"; run "The bookmark starts on this paragraph" ]
+                    para [ run "and continues through this one" ]
+                    para [ run "and ends on this one."; BookmarkRangeEnd "Section2" ]
+                    para [ run "After the bookmark." ] ] ]
+
+    verifyScenarioNamed "Bookmark_MultiParagraph" "output.docx" doc
+
+[<Fact>]
 let ``Hyperlink_Internal`` () =
     let doc =
         document
@@ -325,9 +362,15 @@ let ``Comments`` () =
 
 [<Fact>]
 let ``FootnotesAndEndnotes`` () =
+    let props =
+        { SectionProperties.Default with
+            FootnoteNumbering = Some { Format = LowerRomanFormat; StartAt = None; Restart = RestartEachPage }
+            EndnoteNumbering = Some { Format = DecimalFormat; StartAt = Some 100; Restart = ContinuousRestart } }
+
     let doc =
         document
-            [ section
+            [ sectionWith
+                  props
                   [ para
                         [ run "This claim needs a citation"
                           footnote "Smith, J. (2023). A Study of Claims. Journal of Claims, 12(3), 45-67."
@@ -434,28 +477,37 @@ let ``Table_CustomStyleAndHeaderRow`` () =
     let thin: BorderSide = { Style = SingleLine; Width = Some 0.5; Color = Some Color.black }
 
     let customStyle: TableStyleDefinition =
-        { Id = "MyTableStyle"
-          Name = "My Table Style"
-          BasedOn = None
-          Borders =
-            Some
-                { Outer = { Left = Some thin; Right = Some thin; Top = Some thin; Bottom = Some thin }
-                  InsideHorizontal = Some thin
-                  InsideVertical = Some thin }
-          WholeTable = TableStyleRegion.None
-          FirstRow =
-            { TableStyleRegion.None with
-                RunFormat = Some { RunStyle.Default with Bold = true; Color = Some Color.white }
-                CellShading = Some(Rgb(0x4Fuy, 0x81uy, 0xBDuy)) }
-          BandedRow = { TableStyleRegion.None with CellShading = Some(Rgb(0xDCuy, 0xE6uy, 0xF1uy)) } }
+        { TableStyleDefinition.Default with
+            Id = "MyTableStyle"
+            Name = "My Table Style"
+            Borders =
+                Some
+                    { Outer = { Left = Some thin; Right = Some thin; Top = Some thin; Bottom = Some thin }
+                      InsideHorizontal = Some thin
+                      InsideVertical = Some thin }
+            FirstRow =
+                { TableStyleRegion.None with
+                    RunFormat = Some { RunStyle.Default with Bold = true; Color = Some Color.white }
+                    CellShading = Some(Rgb(0x4Fuy, 0x81uy, 0xBDuy)) }
+            LastRow = { TableStyleRegion.None with RunFormat = Some { RunStyle.Default with Italic = true } }
+            FirstColumn = { TableStyleRegion.None with RunFormat = Some { RunStyle.Default with Bold = true } }
+            BandedRow = { TableStyleRegion.None with CellShading = Some(Rgb(0xDCuy, 0xE6uy, 0xF1uy)) }
+            BandedColumn = { TableStyleRegion.None with CellShading = Some(Rgb(0xF2uy, 0xF2uy, 0xF2uy)) }
+            NorthWestCell = { TableStyleRegion.None with CellShading = Some(Rgb(0x2Duy, 0x50uy, 0x82uy)) } }
 
     let cell (text: string) (width: float) = tableCell ([ para [ run text ] ], props = { TableCellProps.Default with Width = Some width })
+
+    let amountCell =
+        tableCell (
+            [ para [ run "Amount" ] ],
+            props = { TableCellProps.Default with Width = Some 150.0; Margins = Some { Top = Some 2.0; Bottom = Some 2.0; Left = Some 8.0; Right = Some 8.0 } }
+        )
 
     let doc =
         document
             [ section
                   [ table (
-                        [ tableRow ([ cell "Name" 200.0; cell "Amount" 150.0 ], height = 20.0, repeatAsHeader = true)
+                        [ tableRow ([ cell "Name" 200.0; amountCell ], height = 20.0, repeatAsHeader = true)
                           tableRow [ cell "Widgets" 200.0; cell "12" 150.0 ]
                           tableRow [ cell "Gadgets" 200.0; cell "7" 150.0 ] ],
                         [ 200.0; 150.0 ],
@@ -476,12 +528,14 @@ let ``Table_CustomStyleAndHeaderRow`` () =
 [<InlineData("ParagraphFormatting")>]
 [<InlineData("BulletList")>]
 [<InlineData("NumberedList")>]
+[<InlineData("MultiLevelNumberedList")>]
 [<InlineData("Table_Basic")>]
 [<InlineData("Table_MergedCells")>]
 [<InlineData("Table_BordersAndStyle")>]
 [<InlineData("Image")>]
 [<InlineData("Hyperlink_External")>]
 [<InlineData("Bookmark")>]
+[<InlineData("Bookmark_MultiParagraph")>]
 [<InlineData("Hyperlink_Internal")>]
 [<InlineData("Comments")>]
 [<InlineData("FootnotesAndEndnotes")>]

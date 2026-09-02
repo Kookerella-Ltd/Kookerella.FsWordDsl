@@ -33,6 +33,11 @@ module Writer =
           /// every real Word file carries) once the whole body has been walked.
           Footnotes: ResizeArray<int * Wordprocessing.Footnote>
           Endnotes: ResizeArray<int * Wordprocessing.Endnote>
+          /// Name -> the numeric `w:id` assigned when its `BookmarkRangeStart` was written,
+          /// removed once the matching `BookmarkRangeEnd` is written - lets the two ends of
+          /// a cross-paragraph bookmark, written independently, still share OOXML's own
+          /// required matching id even though only `BookmarkRangeStart` carries `name`.
+          OpenBookmarkRanges: Collections.Generic.Dictionary<string, int>
           mutable NextBookmarkId: int
           mutable NextCommentId: int
           mutable NextDrawingId: uint32
@@ -224,6 +229,17 @@ module Writer =
             let endEl = Wordprocessing.BookmarkEnd(Id = StringValue(string id)) :> OpenXmlElement
             let contentEls = content |> List.collect (inlineToElements ctx)
             [ startEl ] @ contentEls @ [ endEl ]
+        | BookmarkRangeStart name ->
+            let id = ctx.NextBookmarkId
+            ctx.NextBookmarkId <- id + 1
+            ctx.OpenBookmarkRanges.[name] <- id
+            [ Wordprocessing.BookmarkStart(Id = StringValue(string id), Name = StringValue name) :> OpenXmlElement ]
+        | BookmarkRangeEnd name ->
+            match ctx.OpenBookmarkRanges.TryGetValue name with
+            | true, id ->
+                ctx.OpenBookmarkRanges.Remove(name) |> ignore
+                [ Wordprocessing.BookmarkEnd(Id = StringValue(string id)) :> OpenXmlElement ]
+            | false, _ -> failwithf "BookmarkRangeEnd %s has no matching BookmarkRangeStart" name
         | Comment(author, initials, date, text, content) ->
             let id = ctx.NextCommentId
             ctx.NextCommentId <- id + 1
@@ -319,9 +335,13 @@ module Writer =
             tcPr.VerticalMerge <- Wordprocessing.VerticalMerge(Val = EnumValue v))
 
         cell.Props.Shading
-        |> Option.iter (fun c -> tcPr.Shading <- Wordprocessing.Shading(Val = EnumValue Wordprocessing.ShadingPatternValues.Clear, Color = StringValue "auto", Fill = StringValue(colorToHex c)))
+        |> Option.iter (fun c ->
+            let sh = Wordprocessing.Shading(Val = EnumValue Wordprocessing.ShadingPatternValues.Clear, Color = StringValue "auto", Fill = StringValue(colorToHex c))
+            applyThemeToShadingFill sh c
+            tcPr.Shading <- sh)
 
         cell.Props.Borders |> Option.iter (fun b -> tcPr.TableCellBorders <- tableCellBordersToW b)
+        cell.Props.Margins |> Option.iter (fun m -> tcPr.TableCellMargin <- cellMarginsToTcMar m)
         tc.TableCellProperties <- tcPr
 
         if cell.Content.IsEmpty then
@@ -337,6 +357,19 @@ module Writer =
         m.Bottom |> Option.iter (fun v -> tcMar.BottomMargin <- Wordprocessing.BottomMargin(Width = StringValue(string (pointsToTwips v)), Type = EnumValue Wordprocessing.TableWidthUnitValues.Dxa))
         m.Left |> Option.iter (fun v -> tcMar.TableCellLeftMargin <- Wordprocessing.TableCellLeftMargin(Width = Int16Value(int16 (pointsToTwips v)), Type = EnumValue Wordprocessing.TableWidthValues.Dxa))
         m.Right |> Option.iter (fun v -> tcMar.TableCellRightMargin <- Wordprocessing.TableCellRightMargin(Width = Int16Value(int16 (pointsToTwips v)), Type = EnumValue Wordprocessing.TableWidthValues.Dxa))
+        tcMar
+
+    /// The per-cell equivalent of `cellMarginsToW` (`w:tcPr/w:tcMar`, overriding the
+    /// table's own default) - a different, if similarly-shaped, set of SDK child element
+    /// classes than the table-wide default uses (`LeftMargin`/`RightMargin` here, not
+    /// `TableCellLeftMargin`/`TableCellRightMargin`), confirmed by reflection same as
+    /// everywhere else this DSL constructs OOXML elements.
+    and private cellMarginsToTcMar (m: CellMargins) : Wordprocessing.TableCellMargin =
+        let tcMar = Wordprocessing.TableCellMargin()
+        m.Top |> Option.iter (fun v -> tcMar.TopMargin <- Wordprocessing.TopMargin(Width = StringValue(string (pointsToTwips v)), Type = EnumValue Wordprocessing.TableWidthUnitValues.Dxa))
+        m.Bottom |> Option.iter (fun v -> tcMar.BottomMargin <- Wordprocessing.BottomMargin(Width = StringValue(string (pointsToTwips v)), Type = EnumValue Wordprocessing.TableWidthUnitValues.Dxa))
+        m.Left |> Option.iter (fun v -> tcMar.LeftMargin <- Wordprocessing.LeftMargin(Width = StringValue(string (pointsToTwips v)), Type = EnumValue Wordprocessing.TableWidthUnitValues.Dxa))
+        m.Right |> Option.iter (fun v -> tcMar.RightMargin <- Wordprocessing.RightMargin(Width = StringValue(string (pointsToTwips v)), Type = EnumValue Wordprocessing.TableWidthUnitValues.Dxa))
         tcMar
 
     and private tableEntryToW (ctx: Ctx) (t: TableEntry) : Wordprocessing.Table =
@@ -444,6 +477,12 @@ module Writer =
 
     /// Builds the `<w:sectPr>` for one section, wiring header/footer relationship ids and
     /// the auto-flag(s) they each require (see `Model.HeaderFooterSet`'s own doc comment).
+    let private noteNumberRestartToW (r: NoteNumberRestart) : Wordprocessing.RestartNumberValues =
+        match r with
+        | ContinuousRestart -> Wordprocessing.RestartNumberValues.Continuous
+        | RestartEachSection -> Wordprocessing.RestartNumberValues.EachSection
+        | RestartEachPage -> Wordprocessing.RestartNumberValues.EachPage
+
     let private sectionPropertiesToW (ctx: Ctx) (props: SectionProperties) : Wordprocessing.SectionProperties =
         let sectPr = Wordprocessing.SectionProperties()
         let mutable titlePage = false
@@ -459,6 +498,25 @@ module Writer =
             f.First |> Option.iter (fun blocks -> sectPr.AppendChild(Wordprocessing.FooterReference(Type = EnumValue Wordprocessing.HeaderFooterValues.First, Id = StringValue(addFooterPart ctx blocks))) |> ignore; titlePage <- true)
             f.Default |> Option.iter (fun blocks -> sectPr.AppendChild(Wordprocessing.FooterReference(Type = EnumValue Wordprocessing.HeaderFooterValues.Default, Id = StringValue(addFooterPart ctx blocks))) |> ignore)
             f.Even |> Option.iter (fun blocks -> sectPr.AppendChild(Wordprocessing.FooterReference(Type = EnumValue Wordprocessing.HeaderFooterValues.Even, Id = StringValue(addFooterPart ctx blocks))) |> ignore; ctx.NeedsEvenAndOddHeaders <- true))
+
+        // `<w:footnotePr>`/`<w:endnotePr>` sit between the header/footer references and
+        // `<w:type>` in CT_SectPr's own fixed element order - schema-valid only in that
+        // position, same reasoning `<w:type>`'s own note right below gives.
+        props.FootnoteNumbering
+        |> Option.iter (fun s ->
+            let fpr = Wordprocessing.FootnoteProperties()
+            fpr.NumberingFormat <- Wordprocessing.NumberingFormat(Val = EnumValue(numberFormatKindToW s.Format))
+            s.StartAt |> Option.iter (fun n -> fpr.NumberingStart <- Wordprocessing.NumberingStart(Val = UInt16Value(uint16 n)))
+            fpr.NumberingRestart <- Wordprocessing.NumberingRestart(Val = EnumValue(noteNumberRestartToW s.Restart))
+            sectPr.AppendChild(fpr) |> ignore)
+
+        props.EndnoteNumbering
+        |> Option.iter (fun s ->
+            let epr = Wordprocessing.EndnoteProperties()
+            epr.NumberingFormat <- Wordprocessing.NumberingFormat(Val = EnumValue(numberFormatKindToW s.Format))
+            s.StartAt |> Option.iter (fun n -> epr.NumberingStart <- Wordprocessing.NumberingStart(Val = UInt16Value(uint16 n)))
+            epr.NumberingRestart <- Wordprocessing.NumberingRestart(Val = EnumValue(noteNumberRestartToW s.Restart))
+            sectPr.AppendChild(epr) |> ignore)
 
         // `<w:type>` sits between the header/footer references and `<w:pgSz>` in CT_SectPr's
         // own fixed element order - schema-valid only in that position.
@@ -576,6 +634,7 @@ module Writer =
         let ctx =
             { MainPart = mainPart
               Comments = ResizeArray()
+              OpenBookmarkRanges = Collections.Generic.Dictionary()
               Footnotes = ResizeArray()
               Endnotes = ResizeArray()
               NextBookmarkId = 1

@@ -54,3 +54,28 @@ module PageSetup =
               Header = 36.0
               Footer = 36.0
               Gutter = 0.0 }
+
+    /// When a footnote/endnote's own counter starts over (`w:numRestart`) - Word's own
+    /// default is `ContinuousRestart` (numbered once, straight through the whole
+    /// document), which is why `Footnote`/`Endnote` need no numbering settings at all by
+    /// default (see `SectionProperties.FootnoteNumbering`/`EndnoteNumbering`).
+    type NoteNumberRestart =
+        | ContinuousRestart
+        | RestartEachSection
+        | RestartEachPage
+
+    /// A section's own footnote/endnote numbering settings (`w:sectPr/w:footnotePr`/
+    /// `w:endnotePr`) - `Format` reuses `Numbering.NumberFormatKind` (the same `w:numFmt`
+    /// vocabulary a list level uses), though `BulletFormat` is meaningless here (Word
+    /// itself never bullets a footnote/endnote reference mark) - this DSL doesn't stop a
+    /// caller from setting it anyway, same "trust the caller" posture the rest of this
+    /// module takes.
+    type NoteNumberingSettings =
+        { Format: NumberFormatKind
+          StartAt: int option
+          Restart: NoteNumberRestart }
+
+        static member Default =
+            { Format = DecimalFormat
+              StartAt = None
+              Restart = ContinuousRestart }

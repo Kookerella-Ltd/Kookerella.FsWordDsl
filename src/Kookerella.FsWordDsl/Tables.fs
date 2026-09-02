@@ -29,24 +29,43 @@ module Tables =
         | RestartMerge
         | ContinueMerge
 
+    /// Cell margins - the table-wide default (`w:tblPr/w:tblCellMar`, see `TableEntry.
+    /// CellMargins`) and a single cell's own override (`w:tcPr/w:tcMar`, see
+    /// `TableCellProps.Margins`) share this exact shape. All fields in points.
+    type CellMargins =
+        { Top: float option
+          Bottom: float option
+          Left: float option
+          Right: float option }
+
+        static member Default =
+            { Top = None
+              Bottom = None
+              Left = None
+              Right = None }
+
     /// Per-cell overrides. `GridSpan` (horizontal merge - "span N grid columns") and
     /// `VerticalMerge` (vertical merge) are independent and can combine on the same cell,
-    /// matching real Word. `Shading`/`Borders`/`Width` override the table's own defaults for
-    /// just this cell; `None` means "inherit from the table."
+    /// matching real Word. `Shading`/`Borders`/`Width`/`Margins` override the table's own
+    /// defaults for just this cell; `None` means "inherit from the table."
     type TableCellProps =
         { GridSpan: int option
           VerticalMerge: VerticalMergeKind option
           Shading: Color option
           Borders: TableBorders option
           /// Points.
-          Width: float option }
+          Width: float option
+          /// This cell's own margin override (`w:tcPr/w:tcMar`) - see `CellMargins`'s own
+          /// doc comment for the table-wide default this overrides.
+          Margins: CellMargins option }
 
         static member Default =
             { GridSpan = None
               VerticalMerge = None
               Shading = None
               Borders = None
-              Width = None }
+              Width = None
+              Margins = None }
 
     /// A reference to a table style *by name* - either a built-in like `"TableGrid"`, or a
     /// custom one defined in `Document.TableStyles` (see `TableStyleDefinition` below,
@@ -67,12 +86,12 @@ module Tables =
               BandedColumns = false }
 
     /// One conditional-formatting region within a custom table style (`w:tblStylePr`).
-    /// OOXML defines ten possible regions (whole table, first/last row, first/last column,
-    /// two banding axes, four corner cells); this DSL models only the three a real custom
-    /// table style overwhelmingly actually uses in practice - whole-table defaults, a
-    /// distinct header row, and alternating row banding - documented as a gap, same "narrow
-    /// scope" posture the rest of this module takes (e.g. `TableBorders` not modeling
-    /// diagonal cell borders).
+    /// OOXML defines thirteen possible regions (whole table, first/last row, first/last
+    /// column, two banding axes - each with an "odd"/"first" and "even"/"second" band -
+    /// and four corner cells); `TableStyleDefinition` models eleven of them, leaving only
+    /// the "second"/even band of each banding axis undistinguished from `WholeTable`'s own
+    /// background (see that type's own doc comment) - same "narrow scope" posture the rest
+    /// of this module takes (e.g. `TableBorders` not modeling diagonal cell borders).
     type TableStyleRegion =
         { RunFormat: RunStyle option
           ParaFormat: ParagraphFormat option
@@ -89,10 +108,10 @@ module Tables =
     /// unlike `TableStyleRef`, which only references a style by name, this actually defines
     /// one. Add it to `Document.TableStyles` (see `Builders.withTableStyles`) and reference
     /// its `Id` from `TableStyleRef.Name` the same way you'd reference a built-in name like
-    /// `"TableGrid"`. `BandedRow` applies to `w:type="band1Horz"` (the odd/first band) only -
-    /// a distinct look for the even band (`band2Horz`) isn't modeled, since in practice a
-    /// banded table's "off" band is just `WholeTable`'s own default background showing
-    /// through.
+    /// `"TableGrid"`. `BandedRow`/`BandedColumn` apply to `w:type="band1Horz"`/`"band1Vert"`
+    /// (the odd/first band on each axis) only - a distinct look for the even band
+    /// (`band2Horz`/`band2Vert`) isn't modeled, since in practice a banded table's "off"
+    /// band is just `WholeTable`'s own default background showing through.
     type TableStyleDefinition =
         { Id: string
           Name: string
@@ -102,7 +121,17 @@ module Tables =
           Borders: TableBorders option
           WholeTable: TableStyleRegion
           FirstRow: TableStyleRegion
-          BandedRow: TableStyleRegion }
+          LastRow: TableStyleRegion
+          FirstColumn: TableStyleRegion
+          LastColumn: TableStyleRegion
+          BandedRow: TableStyleRegion
+          BandedColumn: TableStyleRegion
+          /// The four corner cells (`w:type="neCell"`/`"nwCell"`/`"seCell"`/`"swCell"`) -
+          /// where a row-band region and a column-band region would otherwise overlap.
+          NorthEastCell: TableStyleRegion
+          NorthWestCell: TableStyleRegion
+          SouthEastCell: TableStyleRegion
+          SouthWestCell: TableStyleRegion }
 
         static member Default =
             { Id = ""
@@ -111,21 +140,13 @@ module Tables =
               Borders = None
               WholeTable = TableStyleRegion.None
               FirstRow = TableStyleRegion.None
-              BandedRow = TableStyleRegion.None }
+              LastRow = TableStyleRegion.None
+              FirstColumn = TableStyleRegion.None
+              LastColumn = TableStyleRegion.None
+              BandedRow = TableStyleRegion.None
+              BandedColumn = TableStyleRegion.None
+              NorthEastCell = TableStyleRegion.None
+              NorthWestCell = TableStyleRegion.None
+              SouthEastCell = TableStyleRegion.None
+              SouthWestCell = TableStyleRegion.None }
 
-    /// Table-wide default cell margins (`w:tblPr/w:tblCellMar`) - every cell inherits these
-    /// unless it has its own `w:tcMar` override, which this DSL doesn't model per-cell (same
-    /// "narrow scope" posture `TableStyleRegion` documents above); a caller who needs one
-    /// cell's margins to differ from the table's default is a documented gap. All fields in
-    /// points.
-    type CellMargins =
-        { Top: float option
-          Bottom: float option
-          Left: float option
-          Right: float option }
-
-        static member Default =
-            { Top = None
-              Bottom = None
-              Left = None
-              Right = None }

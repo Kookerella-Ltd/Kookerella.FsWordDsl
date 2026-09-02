@@ -17,10 +17,17 @@ module StyleRegistry =
 
     // --- Color / underline / highlight -------------------------------------------------
 
+    /// The plain hex/`"auto"` fallback value every consumer writes to `w:val`/`w:fill`
+    /// regardless of `Color` case - a `Theme` color's own `Fallback` is used here, same as
+    /// real Word writes a computed value alongside its own `w:themeColor`/`w:themeFill`.
+    /// See `applyThemeToColor`/`applyThemeToShadingFill`/`colorOfRunColor`/
+    /// `colorOfShadingFill` below for the theme-token-preserving read/write path (run color
+    /// and shading/fill only - see `Color.Theme`'s own doc comment on borders).
     let colorToHex (c: Color) : string =
         match c with
         | Rgb(r, g, b) -> sprintf "%02X%02X%02X" r g b
         | Auto -> "auto"
+        | Theme(_, (r, g, b), _, _) -> sprintf "%02X%02X%02X" r g b
 
     let colorOfHex (hex: string) : Color =
         if String.Equals(hex, "auto", StringComparison.OrdinalIgnoreCase) then
@@ -28,6 +35,107 @@ module StyleRegistry =
         else
             let n = Convert.ToInt32(hex, 16)
             Rgb(byte ((n >>> 16) &&& 0xFF), byte ((n >>> 8) &&& 0xFF), byte (n &&& 0xFF))
+
+    let private themeColorKindToW (k: ThemeColorKind) : Wordprocessing.ThemeColorValues =
+        match k with
+        | Dark1Theme -> Wordprocessing.ThemeColorValues.Dark1
+        | Light1Theme -> Wordprocessing.ThemeColorValues.Light1
+        | Dark2Theme -> Wordprocessing.ThemeColorValues.Dark2
+        | Light2Theme -> Wordprocessing.ThemeColorValues.Light2
+        | Accent1Theme -> Wordprocessing.ThemeColorValues.Accent1
+        | Accent2Theme -> Wordprocessing.ThemeColorValues.Accent2
+        | Accent3Theme -> Wordprocessing.ThemeColorValues.Accent3
+        | Accent4Theme -> Wordprocessing.ThemeColorValues.Accent4
+        | Accent5Theme -> Wordprocessing.ThemeColorValues.Accent5
+        | Accent6Theme -> Wordprocessing.ThemeColorValues.Accent6
+        | HyperlinkTheme -> Wordprocessing.ThemeColorValues.Hyperlink
+        | FollowedHyperlinkTheme -> Wordprocessing.ThemeColorValues.FollowedHyperlink
+        | Background1Theme -> Wordprocessing.ThemeColorValues.Background1
+        | Text1Theme -> Wordprocessing.ThemeColorValues.Text1
+        | Background2Theme -> Wordprocessing.ThemeColorValues.Background2
+        | Text2Theme -> Wordprocessing.ThemeColorValues.Text2
+
+    let private themeColorKindOfW (v: Wordprocessing.ThemeColorValues) : ThemeColorKind =
+        if v = Wordprocessing.ThemeColorValues.Dark1 then Dark1Theme
+        elif v = Wordprocessing.ThemeColorValues.Light1 then Light1Theme
+        elif v = Wordprocessing.ThemeColorValues.Dark2 then Dark2Theme
+        elif v = Wordprocessing.ThemeColorValues.Light2 then Light2Theme
+        elif v = Wordprocessing.ThemeColorValues.Accent1 then Accent1Theme
+        elif v = Wordprocessing.ThemeColorValues.Accent2 then Accent2Theme
+        elif v = Wordprocessing.ThemeColorValues.Accent3 then Accent3Theme
+        elif v = Wordprocessing.ThemeColorValues.Accent4 then Accent4Theme
+        elif v = Wordprocessing.ThemeColorValues.Accent5 then Accent5Theme
+        elif v = Wordprocessing.ThemeColorValues.Accent6 then Accent6Theme
+        elif v = Wordprocessing.ThemeColorValues.Hyperlink then HyperlinkTheme
+        elif v = Wordprocessing.ThemeColorValues.FollowedHyperlink then FollowedHyperlinkTheme
+        elif v = Wordprocessing.ThemeColorValues.Background1 then Background1Theme
+        elif v = Wordprocessing.ThemeColorValues.Text1 then Text1Theme
+        elif v = Wordprocessing.ThemeColorValues.Background2 then Background2Theme
+        else Text2Theme
+
+    /// OOXML's own `w:themeTint`/`w:themeShade`/`w:themeFillTint`/`w:themeFillShade` are a
+    /// single byte (`00`-`FF`) where `FF` = 100% - this DSL exposes that as `0.0`-`1.0`
+    /// instead, matching the slider Word's own UI shows.
+    let private tintToHexByte (pct: float) : string = sprintf "%02X" (byte (Math.Round(pct * 255.0)))
+    let private hexByteToTint (hex: string) : float = float (Convert.ToInt32(hex, 16)) / 255.0
+
+    /// Stamps `w:themeColor`/`w:themeTint`/`w:themeShade` onto an already-built `w:color`
+    /// element when `c` is `Theme` - a no-op for `Rgb`/`Auto` (`colorToHex` above already
+    /// wrote the plain `w:val` either way).
+    let applyThemeToColor (rc: Wordprocessing.Color) (c: Color) : unit =
+        match c with
+        | Theme(kind, _, tint, shade) ->
+            rc.ThemeColor <- EnumValue(themeColorKindToW kind)
+            tint |> Option.iter (fun t -> rc.ThemeTint <- StringValue(tintToHexByte t))
+            shade |> Option.iter (fun s -> rc.ThemeShade <- StringValue(tintToHexByte s))
+        | _ -> ()
+
+    /// The `w:shd`-side equivalent of `applyThemeToColor`, for the fill/background theme
+    /// attributes (`w:themeFill`/`w:themeFillTint`/`w:themeFillShade`) - `w:shd`'s
+    /// foreground `w:themeColor` attributes are unused here since this DSL always writes a
+    /// plain `w:color="auto"` foreground for shading (see `paragraphPropertiesOf` etc.).
+    let applyThemeToShadingFill (sh: Wordprocessing.Shading) (c: Color) : unit =
+        match c with
+        | Theme(kind, _, tint, shade) ->
+            sh.ThemeFill <- EnumValue(themeColorKindToW kind)
+            tint |> Option.iter (fun t -> sh.ThemeFillTint <- StringValue(tintToHexByte t))
+            shade |> Option.iter (fun s -> sh.ThemeFillShade <- StringValue(tintToHexByte s))
+        | _ -> ()
+
+    /// The inverse of `applyThemeToColor` plus `colorToHex`/`colorOfHex` together - reads a
+    /// `w:color` element back as `Theme` when it carries a theme token, `Rgb`/`Auto`
+    /// (via `colorOfHex`) otherwise.
+    let colorOfRunColor (rc: Wordprocessing.Color) : Color =
+        let hex = if isNull rc.Val then "auto" else rc.Val.Value
+
+        match rc.ThemeColor |> Option.ofObj with
+        | Some tc ->
+            Theme(
+                themeColorKindOfW tc.Value,
+                (match colorOfHex hex with
+                 | Rgb(r, g, b) -> r, g, b
+                 | _ -> 0uy, 0uy, 0uy),
+                rc.ThemeTint |> Option.ofObj |> Option.map (fun v -> hexByteToTint v.Value),
+                rc.ThemeShade |> Option.ofObj |> Option.map (fun v -> hexByteToTint v.Value)
+            )
+        | None -> colorOfHex hex
+
+    /// The `w:shd`-side equivalent of `colorOfRunColor`, reading `w:fill`/`w:themeFill`/
+    /// `w:themeFillTint`/`w:themeFillShade` back.
+    let colorOfShadingFill (sh: Wordprocessing.Shading) : Color =
+        let hex = if isNull sh.Fill then "auto" else sh.Fill.Value
+
+        match sh.ThemeFill |> Option.ofObj with
+        | Some tf ->
+            Theme(
+                themeColorKindOfW tf.Value,
+                (match colorOfHex hex with
+                 | Rgb(r, g, b) -> r, g, b
+                 | _ -> 0uy, 0uy, 0uy),
+                sh.ThemeFillTint |> Option.ofObj |> Option.map (fun v -> hexByteToTint v.Value),
+                sh.ThemeFillShade |> Option.ofObj |> Option.map (fun v -> hexByteToTint v.Value)
+            )
+        | None -> colorOfHex hex
 
     let underlineToW (u: UnderlineStyle) : Wordprocessing.UnderlineValues =
         match u with
@@ -227,7 +335,10 @@ module StyleRegistry =
                     rPr.Strike <- Wordprocessing.Strike()
 
                 s.Color
-                |> Option.iter (fun c -> rPr.Color <- Wordprocessing.Color(Val = StringValue(colorToHex c)))
+                |> Option.iter (fun c ->
+                    let rc = Wordprocessing.Color(Val = StringValue(colorToHex c))
+                    applyThemeToColor rc c
+                    rPr.Color <- rc)
 
                 s.Highlight
                 |> Option.iter (fun h -> rPr.Highlight <- Wordprocessing.Highlight(Val = EnumValue(highlightToW h)))
@@ -289,9 +400,7 @@ module StyleRegistry =
                             if isNull rPr.Underline then None
                             else rPr.Underline.Val |> Option.ofObj |> Option.map (fun v -> underlineOfW v.Value)
                         Strikethrough = not (isNull rPr.Strike)
-                        Color =
-                            if isNull rPr.Color then None
-                            else rPr.Color.Val |> Option.ofObj |> Option.map (fun v -> colorOfHex v.Value)
+                        Color = if isNull rPr.Color then None else Some(colorOfRunColor rPr.Color)
                         Highlight =
                             if isNull rPr.Highlight then None
                             else rPr.Highlight.Val |> Option.ofObj |> Option.bind (fun v -> highlightOfW v.Value)
@@ -440,7 +549,10 @@ module StyleRegistry =
                 f.Borders |> Option.iter (fun b -> pPr.ParagraphBorders <- paragraphBordersToW b)
 
                 f.Shading
-                |> Option.iter (fun c -> pPr.Shading <- Wordprocessing.Shading(Val = EnumValue Wordprocessing.ShadingPatternValues.Clear, Color = StringValue "auto", Fill = StringValue(colorToHex c)))
+                |> Option.iter (fun c ->
+                    let sh = Wordprocessing.Shading(Val = EnumValue Wordprocessing.ShadingPatternValues.Clear, Color = StringValue "auto", Fill = StringValue(colorToHex c))
+                    applyThemeToShadingFill sh c
+                    pPr.Shading <- sh)
 
                 if not f.TabStops.IsEmpty then
                     pPr.Tabs <- tabsToW f.TabStops)
@@ -520,7 +632,7 @@ module StyleRegistry =
                       KeepWithNext = not (isNull pPr.KeepNext)
                       PageBreakBefore = not (isNull pPr.PageBreakBefore)
                       Borders = if isNull pPr.ParagraphBorders then None else Some(paragraphBordersOfW pPr.ParagraphBorders)
-                      Shading = if isNull pPr.Shading then None else pPr.Shading.Fill |> Option.ofObj |> Option.map (fun v -> colorOfHex v.Value)
+                      Shading = if isNull pPr.Shading then None else Some(colorOfShadingFill pPr.Shading)
                       TabStops = if isNull pPr.Tabs then [] else tabsOfW pPr.Tabs }
 
     let styleIdOfParagraphProperties (pPr: Wordprocessing.ParagraphProperties option) : string option =
@@ -657,7 +769,9 @@ module StyleRegistry =
             region.CellShading
             |> Option.iter (fun c ->
                 let tcPr = Wordprocessing.TableStyleConditionalFormattingTableCellProperties()
-                tcPr.Shading <- Wordprocessing.Shading(Val = EnumValue Wordprocessing.ShadingPatternValues.Clear, Color = StringValue "auto", Fill = StringValue(colorToHex c))
+                let sh = Wordprocessing.Shading(Val = EnumValue Wordprocessing.ShadingPatternValues.Clear, Color = StringValue "auto", Fill = StringValue(colorToHex c))
+                applyThemeToShadingFill sh c
+                tcPr.Shading <- sh
                 tsp.TableStyleConditionalFormattingTableCellProperties <- tcPr)
 
             Some tsp
@@ -677,8 +791,7 @@ module StyleRegistry =
             tsp.TableStyleConditionalFormattingTableCellProperties
             |> Option.ofObj
             |> Option.bind (fun tcp -> tcp.Shading |> Option.ofObj)
-            |> Option.bind (fun sh -> sh.Fill |> Option.ofObj)
-            |> Option.map (fun v -> colorOfHex v.Value)
+            |> Option.map colorOfShadingFill
 
         { RunFormat = runFormat; ParaFormat = paraFormat; CellShading = cellShading }
 
@@ -701,7 +814,15 @@ module StyleRegistry =
 
             [ Wordprocessing.TableStyleOverrideValues.WholeTable, d.WholeTable
               Wordprocessing.TableStyleOverrideValues.FirstRow, d.FirstRow
-              Wordprocessing.TableStyleOverrideValues.Band1Horizontal, d.BandedRow ]
+              Wordprocessing.TableStyleOverrideValues.LastRow, d.LastRow
+              Wordprocessing.TableStyleOverrideValues.FirstColumn, d.FirstColumn
+              Wordprocessing.TableStyleOverrideValues.LastColumn, d.LastColumn
+              Wordprocessing.TableStyleOverrideValues.Band1Horizontal, d.BandedRow
+              Wordprocessing.TableStyleOverrideValues.Band1Vertical, d.BandedColumn
+              Wordprocessing.TableStyleOverrideValues.NorthEastCell, d.NorthEastCell
+              Wordprocessing.TableStyleOverrideValues.NorthWestCell, d.NorthWestCell
+              Wordprocessing.TableStyleOverrideValues.SouthEastCell, d.SouthEastCell
+              Wordprocessing.TableStyleOverrideValues.SouthWestCell, d.SouthWestCell ]
             |> List.iter (fun (kind, region) -> tableStyleRegionToOpenXml kind region |> Option.iter (fun tsp -> s.AppendChild(tsp) |> ignore))
 
             s)
@@ -731,5 +852,13 @@ module StyleRegistry =
                     |> Option.map tableBordersOfOpenXml
                   WholeTable = regionOf Wordprocessing.TableStyleOverrideValues.WholeTable
                   FirstRow = regionOf Wordprocessing.TableStyleOverrideValues.FirstRow
-                  BandedRow = regionOf Wordprocessing.TableStyleOverrideValues.Band1Horizontal })
+                  LastRow = regionOf Wordprocessing.TableStyleOverrideValues.LastRow
+                  FirstColumn = regionOf Wordprocessing.TableStyleOverrideValues.FirstColumn
+                  LastColumn = regionOf Wordprocessing.TableStyleOverrideValues.LastColumn
+                  BandedRow = regionOf Wordprocessing.TableStyleOverrideValues.Band1Horizontal
+                  BandedColumn = regionOf Wordprocessing.TableStyleOverrideValues.Band1Vertical
+                  NorthEastCell = regionOf Wordprocessing.TableStyleOverrideValues.NorthEastCell
+                  NorthWestCell = regionOf Wordprocessing.TableStyleOverrideValues.NorthWestCell
+                  SouthEastCell = regionOf Wordprocessing.TableStyleOverrideValues.SouthEastCell
+                  SouthWestCell = regionOf Wordprocessing.TableStyleOverrideValues.SouthWestCell })
             |> List.ofSeq

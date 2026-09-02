@@ -12,9 +12,9 @@ inexact, lossy, or simply not implemented yet, so you know what to expect from a
   `Run`s - unlike Excel's own `CellValue` (always one uniformly-styled `Text` cell), rich
   text (mixed formatting within one paragraph) is first-class here, not a documented gap.
   Run formatting: font family, size, bold, italic, underline (six named styles plus an
-  `OtherUnderline` escape hatch), strikethrough, color, highlight (Word's own fixed
-  16-color palette, not arbitrary RGB), superscript/subscript, small caps, all caps,
-  hidden text.
+  `OtherUnderline` escape hatch), strikethrough, color (`Rgb`, `Auto`, or a theme-relative
+  `Theme` color - see below), highlight (Word's own fixed 16-color palette, not arbitrary
+  RGB), superscript/subscript, small caps, all caps, hidden text.
 - **Paragraph formatting**: alignment, spacing before/after, line spacing (single/1.5/
   double/at-least/exactly/multiple), indentation (left/right/first-line/hanging),
   keep-with-next, page-break-before, borders (`BorderStyle`, the same shape reused for
@@ -24,37 +24,55 @@ inexact, lossy, or simply not implemented yet, so you know what to expect from a
   leaders, plus an `OtherTabAlignment` escape hatch) - an empty `TabStops` list means "no
   custom tabs", not "clear Word's own inherited defaults" (this DSL doesn't author
   `w:val="clear"` entries).
+- **Theme colors** (`Color.Theme`): Word's twelve standard theme slots (`ThemeColorKind`),
+  with an explicit `Fallback` RGB and optional tint/shade - since this DSL has no theme
+  part (`word/theme/theme1.xml`) to resolve a token against, real Word does the resolving,
+  the same "always also write a computed value" convention Word itself follows so a
+  themeless reader still sees something reasonable. Only modeled for run color and
+  shading/fill backgrounds (`RunStyle.Color`, `ParagraphFormat.Shading`, `TableCellProps.
+  Shading`, `TableStyleRegion.CellShading`) - see the gap below on border colors.
 - **Named styles** (`styles.xml`): paragraph and character styles, with `BasedOn`
   inheritance (the chain itself isn't resolved by this DSL - see the gap below) and a
   small built-in catalog (`BuiltInStyles.normal`/`heading1`/`2`/`3`/`title`/
   `listParagraph`/`hyperlinkCharStyle`) with explicit formatting rather than relying on
   Word's own built-in template defaults.
-- **Numbered/bulleted lists**: single-level list definitions (bullet glyph + font, decimal,
-  lower/upper letter, lower/upper roman, plus `OtherFormat` for any other raw OOXML
-  `numFmt`), indentation, start-at value. This DSL collapses WordprocessingML's own
-  abstract-numbering/numbering-instance indirection into one `NumberingDefinition` per
-  distinct list - see the gap below on multi-level lists.
+- **Numbered/bulleted lists, including multi-level**: list definitions (bullet glyph +
+  font, decimal, lower/upper letter, lower/upper roman, plus `OtherFormat` for any other
+  raw OOXML `numFmt`), indentation, start-at value, per level - `NumberingDefinition.
+  Levels` isn't limited to one level, and `Writer`/`Reader` handle any number of them the
+  same way; `Builders.multiLevelNumberedListDef` builds the common correctly-linked
+  outline shape ("1.", "1.1.", "1.1.1.", ...) without a caller having to hand-author each
+  level's own `%N`-placeholder `Text` pattern (which this DSL still doesn't validate
+  against the nesting it's used at - trust-the-caller, same posture direct formatting
+  fields take). This DSL collapses WordprocessingML's own abstract-numbering/
+  numbering-instance indirection into one `NumberingDefinition` per distinct list.
 - **Tables**: rows and cells with horizontal merge (`GridSpan`) and vertical merge
   (`Restart`/`Continue`), per-cell shading and border overrides, column widths, a table
   style reference (name + banding flags - either a built-in like `"TableGrid"`, or a
   custom `TableStyleDefinition`, see below), table-level borders (outer sides plus inside
-  horizontal/vertical), a table-wide default cell margin (`CellMargins` - top/bottom/
-  left/right, no per-cell override, see the gap below), and a row's own "repeat as header
-  on every page" flag (`TableRow.RepeatAsHeader`). A cell's content is a `Block list`, so
-  a cell containing a nested table is exactly how Word itself represents one.
+  horizontal/vertical), a table-wide default cell margin (`TableEntry.CellMargins`) with a
+  per-cell override on top (`TableCellProps.Margins` - same `CellMargins` shape either
+  way), and a row's own "repeat as header on every page" flag (`TableRow.
+  RepeatAsHeader`). A cell's content is a `Block list`, so a cell containing a nested
+  table is exactly how Word itself represents one.
 - **Custom table style definitions** (`TableStyleDefinition`, `styles.xml` `w:type="table"`
   entries, referenced from `Document.TableStyles` by a `TableStyleRef.Name` the same way a
-  built-in name is): base table borders, plus three of OOXML's ten conditional-formatting
-  regions - whole-table defaults, a distinct first (header) row, and one alternating-row
-  band - each with its own run/paragraph formatting and cell shading. See the gap below on
-  the seven regions not covered.
+  built-in name is): base table borders, plus eleven of OOXML's thirteen conditional-
+  formatting regions - whole-table defaults, first/last row, first/last column, one band
+  per banding axis (`BandedRow`/`BandedColumn`), and all four corner cells - each with its
+  own run/paragraph formatting and cell shading. See the gap below on the two regions not
+  covered.
 - **Images**: PNG/JPEG/GIF/BMP raster images anchored inline within a run (the natural
   placement for Word, unlike Excel's cell-range anchor) - `Data` is the image file's own
   raw bytes, embedded and read back byte-for-byte with no decoding/re-encoding.
 - **Hyperlinks**: external (any URL, including `mailto:`) and internal (same-document
   bookmark) targets, wrapping one or more runs, with an optional tooltip.
-- **Bookmarks**: named ranges within the document, wrapping inline content - scoped to
-  within a single paragraph (see the gap below).
+- **Bookmarks**: named ranges within the document. `Inline.Bookmark` wraps inline content
+  within a single paragraph, the common ergonomic case; a bookmark spanning more than one
+  paragraph is `BookmarkRangeStart`/`BookmarkRangeEnd` instead - two independent markers a
+  caller places directly in separate paragraphs' own `Inlines`, sharing a `name` (`Writer`
+  assigns the matching OOXML `w:id` automatically; `Reader` resolves a bare `w:bookmarkEnd`
+  back to its name via a document-wide id->name pass built before per-paragraph reading).
 - **Comments**: modern Word comments (author, initials, date, text) anchored to a range of
   inline content - scoped to within a single paragraph (see the gap below). Not the legacy
   "cell comment" concept Excel models; this is what current Word's UI calls a comment.
@@ -72,7 +90,11 @@ inexact, lossy, or simply not implemented yet, so you know what to expect from a
   sequential id automatically. `Writer` prepends the note-reference-mark run itself (`w:
   footnoteRef`/`w:endnoteRef`) to the body's first paragraph, and both parts always carry
   the two boilerplate separator/continuation-separator entries a real Word-authored file
-  has - a caller never has to think about either. See the gap below on custom numbering.
+  has - a caller never has to think about either. Numbering itself is customizable per
+  section (`SectionProperties.FootnoteNumbering`/`EndnoteNumbering`, `w:sectPr/
+  w:footnotePr`/`w:endnotePr`): number format (reusing `Numbering.NumberFormatKind`),
+  start-at value, and restart behavior (continuous, or restarting each section/page) -
+  `None` is Word's own default (continuous decimal from 1).
 - **Headers and footers**: `Default`/`First`/`Even` variants per section, each arbitrary
   `Block` content - the `titlePg`/`evenAndOddHeaders` flags real Word needs to actually
   honor `First`/`Even` are set automatically whenever they're used.
@@ -107,34 +129,28 @@ inexact, lossy, or simply not implemented yet, so you know what to expect from a
   all - a document is always written (and read) as if "accept all changes" had already
   been applied.
 - **Content controls (structured document tags).** Not modeled.
-- **Footnote/endnote numbering customization.** Always continuous decimal numbering
-  starting at 1, document-wide (Word's own default) - a custom number format, or
-  restarting the count per section/page, isn't modeled (`w:footnotePr`/`w:endnotePr` at the
-  section level aren't written or read).
 - **Real field computation.** Only raw instruction text + a cached display value round-trip
   (see "Modeled faithfully" above) - a table of contents, cross-reference, or any other
   field that depends on document layout is never actually computed by this DSL, unlike
   Excel's pivot tables (which *do* perform real aggregation at write time).
-- **Comments/bookmarks spanning more than one paragraph.** Both are scoped to wrapping
-  inline content within a single paragraph in this DSL - a foreign file with either
-  spanning multiple paragraphs degrades on read (the range is not reconstructed across the
-  paragraph boundary).
-- **Table style definitions beyond whole-table/first-row/one banding axis.** OOXML defines
-  ten conditional-formatting regions for a table style (also: last row, first/last column,
-  a second banding axis, four corner cells) - `TableStyleDefinition` models the three
-  overwhelmingly used in practice (see "Modeled faithfully" above); the other seven aren't
-  authored or read, same "narrow scope, document the gap" posture the rest of this module
-  takes.
-- **Per-cell margin overrides.** `TableEntry.CellMargins` is the table-wide default
-  (`w:tblCellMar`) only - a single cell's own `w:tcMar` override isn't modeled, so a
-  foreign file using one degrades to the table's default on read.
-- **Multi-level numbering.** `NumberingDefinition.Levels` supports several levels, but this
-  DSL doesn't validate that a paragraph's `(numId, level)` reference and a level's own
-  `Text` placeholder pattern (e.g. `"%1.%2"`) actually agree - malformed combinations write
-  and read back verbatim rather than being caught.
-- **Theme colors.** `Styles.Color` only models `Rgb` and `Auto` - a run or highlight using
-  a theme color reference isn't modeled, same documented gap Excel's own unresolved
-  `Theme`/`Indexed` colors have.
+- **Comments spanning more than one paragraph.** `Inline.Comment` is scoped to wrapping
+  inline content within a single paragraph - unlike `Bookmark` (which now has
+  `BookmarkRangeStart`/`End` for the multi-paragraph case, see "Modeled faithfully"
+  above), splitting `Comment` the same way would also need to relocate its metadata
+  (author/initials/date/text), which lives wrapped inside the case itself today rather
+  than in a separate id-keyed table the way footnotes/table styles are. A foreign file
+  with a comment spanning multiple paragraphs degrades on read (the range is not
+  reconstructed across the paragraph boundary).
+- **The "second" band of each table-style banding axis.** `TableStyleDefinition.
+  BandedRow`/`BandedColumn` apply to the odd/first band only (`w:type="band1Horz"`/
+  `"band1Vert"`) - a distinct look for the even band (`band2Horz`/`band2Vert`) isn't
+  modeled, since in practice a banded table's "off" band is just `WholeTable`'s own
+  default background showing through (see "Modeled faithfully" above for the eleven
+  regions that *are* covered).
+- **Theme colors on borders, and theme colors used in `w:highlight`.** `BorderSide.Color`
+  round-trips a `Theme` value as its `Fallback` RGB only (the theme token itself isn't
+  preserved there - see "Modeled faithfully" above); `RunStyle.Highlight`'s fixed
+  16-color palette has no theme-color concept in OOXML at all, so this doesn't apply to it.
 - **Text boxes, SmartArt, embedded charts/OLE objects.** Not modeled - a Word document's
   drawing canvas is used here only for the one inline-image case (see "Modeled faithfully"
   above).
