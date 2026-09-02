@@ -88,6 +88,13 @@ module Model =
         /// writes ordinary paragraph content and never has to think about that marker.
         | Footnote of content: Block list
         | Endnote of content: Block list
+        /// Track changes (`w:ins`/`w:del`) - wraps arbitrary inline content the same way
+        /// `Bookmark`/`Comment` do, marking it as inserted or deleted by `Revision.Author`
+        /// on `Revision.Date`. `Writer` assigns the matching OOXML `w:id` automatically.
+        /// See `Revisions.fs`'s own doc comment for what's modeled here and what isn't
+        /// (formatting-change history, moves, and table row/cell tracking are documented
+        /// gaps, not covered by this case).
+        | TrackedChange of revision: Revision * content: Inline list
 
     /// One paragraph's content plus its formatting. `StyleId` references a named style
     /// (`Document.Styles`, e.g. `"Heading1"`) - the inheritance layer; `Format` is direct/
@@ -98,7 +105,12 @@ module Model =
         { Inlines: Inline list
           StyleId: string option
           Format: ParagraphFormat option
-          Numbering: (int * int) option }
+          Numbering: (int * int) option
+          /// Whether this paragraph's own closing mark (the boundary to the next
+          /// paragraph) was itself inserted or deleted under track changes - distinct
+          /// from any `TrackedChange` wrapping the paragraph's own `Inlines`, which marks
+          /// the *content* rather than the mark. `None` is the ordinary, untracked case.
+          MarkRevision: Revision option }
 
     /// A block-level unit of document content - a paragraph, or a table (which itself
     /// contains more `Block`s per cell, hence the recursion). Unlike `Inline`'s cases,

@@ -436,6 +436,23 @@ module Xml =
           Borders = el.Element(xn "tableBorders") |> Option.ofObj |> Option.map tableBordersOfXml
           Width = strAttr "width" el |> Option.map float }
 
+    let private revisionKindToStr (k: RevisionKind) : string =
+        match k with
+        | Inserted -> "inserted"
+        | Deleted -> "deleted"
+
+    let private revisionKindOfStr (s: string) : RevisionKind = if s = "deleted" then Deleted else Inserted
+
+    /// Shared by `Inline.TrackedChange` (below) and `Paragraph.MarkRevision` - same
+    /// `kind`/`author`/`date` shape either way.
+    let private revisionOfXml (el: XElement) : Revision =
+        { Kind = revisionKindOfStr (el.Attribute(xn "kind").Value)
+          Author = el.Attribute(xn "author").Value
+          Date = strAttr "date" el |> Option.map DateTime.Parse }
+
+    let private markRevisionToXml (r: Revision) : XElement =
+        XElement(xn "markRevision", attr "kind" (revisionKindToStr r.Kind), attr "author" r.Author, attrOpt "date" (r.Date |> Option.map (fun d -> d.ToString("o"))))
+
     // `inlineToXml`/`inlineOfXml` need `blockToXml`/`blockOfXml` (a `Footnote`/`Endnote`'s
     // own body is a `Block list`), which need `paragraphToXml`/`paragraphOfXml`, which need
     // `inlineToXml`/`inlineOfXml` back for a paragraph's own `Inlines` - one `rec ... and
@@ -472,6 +489,14 @@ module Xml =
                 XElement(xn "text", text)
             )
         | CommentRangeEnd id -> XElement(xn "commentRangeEnd", attr "id" id)
+        | TrackedChange(revision, content) ->
+            XElement(
+                xn "trackedChange",
+                attr "kind" (revisionKindToStr revision.Kind),
+                attr "author" revision.Author,
+                attrOpt "date" (revision.Date |> Option.map (fun d -> d.ToString("o"))),
+                content |> List.map inlineToXml
+            )
         | Field(instr, cached) -> XElement(xn "field", attr "instruction" instr, attrOpt "cachedResult" cached)
         | Footnote content -> XElement(xn "footnote", XElement(xn "body", content |> List.map blockToXml))
         | Endnote content -> XElement(xn "endnote", XElement(xn "body", content |> List.map blockToXml))
@@ -498,6 +523,7 @@ module Xml =
             let text = el.Element(xn "text").Value
             CommentRangeStart(el.Attribute(xn "id").Value, el.Attribute(xn "author").Value, strAttr "initials" el, strAttr "date" el |> Option.map DateTime.Parse, text)
         | "commentRangeEnd" -> CommentRangeEnd(el.Attribute(xn "id").Value)
+        | "trackedChange" -> TrackedChange(revisionOfXml el, el.Elements() |> Seq.map inlineOfXml |> List.ofSeq)
         | "field" -> Field(el.Attribute(xn "instruction").Value, strAttr "cachedResult" el)
         | "footnote" -> Footnote(el.Element(xn "body").Elements() |> Seq.map blockOfXml |> List.ofSeq)
         | "endnote" -> Endnote(el.Element(xn "body").Elements() |> Seq.map blockOfXml |> List.ofSeq)
@@ -510,6 +536,7 @@ module Xml =
             attrOpt "numId" (p.Numbering |> Option.map fst),
             attrOpt "level" (p.Numbering |> Option.map snd),
             (p.Format |> Option.map paragraphFormatToXml |> Option.toList),
+            (p.MarkRevision |> Option.map markRevisionToXml |> Option.toList),
             p.Inlines |> List.map inlineToXml
         )
 
@@ -517,9 +544,10 @@ module Xml =
         let numId = strAttr "numId" el |> Option.map int
         let level = strAttr "level" el |> Option.map int
 
-        { Inlines = el.Elements() |> Seq.filter (fun c -> c.Name.LocalName <> "paragraphFormat") |> Seq.map inlineOfXml |> List.ofSeq
+        { Inlines = el.Elements() |> Seq.filter (fun c -> c.Name.LocalName <> "paragraphFormat" && c.Name.LocalName <> "markRevision") |> Seq.map inlineOfXml |> List.ofSeq
           StyleId = strAttr "styleId" el
           Format = el.Element(xn "paragraphFormat") |> Option.ofObj |> Option.map paragraphFormatOfXml
+          MarkRevision = el.Element(xn "markRevision") |> Option.ofObj |> Option.map revisionOfXml
           Numbering = match numId, level with
                       | Some n, Some l -> Some(n, l)
                       | _ -> None }

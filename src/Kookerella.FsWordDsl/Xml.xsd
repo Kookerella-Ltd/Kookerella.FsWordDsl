@@ -134,6 +134,7 @@
   <xs:complexType name="paraType">
     <xs:sequence>
       <xs:element name="paragraphFormat" type="paragraphFormatType" minOccurs="0" />
+      <xs:element name="markRevision" type="revisionType" minOccurs="0" />
       <xs:choice minOccurs="0" maxOccurs="unbounded">
         <xs:element name="run" type="runType" />
         <xs:element name="lineBreak" type="emptyType" />
@@ -147,6 +148,7 @@
         <xs:element name="comment" type="commentType" />
         <xs:element name="commentRangeStart" type="commentRangeStartType" />
         <xs:element name="commentRangeEnd" type="commentRangeEndType" />
+        <xs:element name="trackedChange" type="trackedChangeType" />
         <xs:element name="field" type="fieldType" />
         <xs:element name="footnote" type="noteType" />
         <xs:element name="endnote" type="noteType" />
@@ -155,6 +157,24 @@
     <xs:attribute name="styleId" type="xs:string" />
     <xs:attribute name="numId" type="xs:int" />
     <xs:attribute name="level" type="xs:int" />
+  </xs:complexType>
+
+  <!-- Track changes (`Inline.TrackedChange`, `Paragraph.MarkRevision`) - `kind` is
+       `"inserted"`/`"deleted"`. -->
+  <xs:complexType name="revisionType">
+    <xs:attribute name="kind" type="xs:string" use="required" />
+    <xs:attribute name="author" type="xs:string" use="required" />
+    <xs:attribute name="date" type="xs:string" />
+  </xs:complexType>
+
+  <xs:complexType name="trackedChangeType">
+    <xs:complexContent>
+      <xs:extension base="inlineContentType">
+        <xs:attribute name="kind" type="xs:string" use="required" />
+        <xs:attribute name="author" type="xs:string" use="required" />
+        <xs:attribute name="date" type="xs:string" />
+      </xs:extension>
+    </xs:complexContent>
   </xs:complexType>
 
   <!-- A cross-paragraph bookmark boundary marker (`Inline.BookmarkRangeStart`/`End`) -
@@ -175,6 +195,7 @@
       <xs:element name="hyperlink" type="hyperlinkType" />
       <xs:element name="bookmark" type="bookmarkType" />
       <xs:element name="comment" type="commentType" />
+      <xs:element name="trackedChange" type="trackedChangeType" />
       <xs:element name="field" type="fieldType" />
     </xs:choice>
   </xs:complexType>

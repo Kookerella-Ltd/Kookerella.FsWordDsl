@@ -49,6 +49,14 @@ module Writer =
           mutable NextDrawingId: uint32
           mutable NextFootnoteId: int
           mutable NextEndnoteId: int
+          mutable NextRevisionId: int
+          /// Whether the `Inline` currently being written sits inside a `TrackedChange`
+          /// with `Kind = Deleted` - a run's own text uses `w:delText` instead of `w:t`
+          /// there (same run properties/styling either way). Save-and-restore around each
+          /// `Deleted` case's own recursion (not a hard reset to `false`), so a `Deleted`
+          /// nested inside another `Deleted` - unusual, but structurally possible - doesn't
+          /// incorrectly flip back to "not deleted" partway through.
+          mutable InsideDeletion: bool
           /// Whether ANY section uses an `Even` header/footer - `<w:evenAndOddHeaders/>` is
           /// a document-wide `settings.xml` flag, not a per-section `sectPr` child, unlike
           /// `<w:titlePg/>` (which genuinely is per-section).
@@ -133,13 +141,23 @@ module Writer =
 
     // --- Inline content ---------------------------------------------------------------------
 
-    let private textRun (text: string) (style: RunStyle option) (styleId: string option) : Wordprocessing.Run =
+    let private textRun (ctx: Ctx) (text: string) (style: RunStyle option) (styleId: string option) : Wordprocessing.Run =
         let r = Wordprocessing.Run()
         runPropertiesOf style styleId |> Option.iter (fun p -> r.RunProperties <- p)
-        let t = Wordprocessing.Text(text)
-        if text.StartsWith(" ") || text.EndsWith(" ") || text.Contains("\t") then
-            t.Space <- EnumValue SpaceProcessingModeValues.Preserve
-        r.AppendChild(t) |> ignore
+        let preserveSpace = text.StartsWith(" ") || text.EndsWith(" ") || text.Contains("\t")
+
+        // A run inside `w:del` (`ctx.InsideDeletion`) uses `w:delText` instead of `w:t` for
+        // its own text - schema-required, not just convention (`OpenXmlValidator` flags a
+        // plain `w:t` there). Same run properties/styling either way.
+        if ctx.InsideDeletion then
+            let t = Wordprocessing.DeletedText(text)
+            if preserveSpace then t.Space <- EnumValue SpaceProcessingModeValues.Preserve
+            r.AppendChild(t) |> ignore
+        else
+            let t = Wordprocessing.Text(text)
+            if preserveSpace then t.Space <- EnumValue SpaceProcessingModeValues.Preserve
+            r.AppendChild(t) |> ignore
+
         r
 
     /// A `Wordprocessing.Run` wrapping exactly one child. NOT `Wordprocessing.Run(child)`
@@ -192,17 +210,47 @@ module Writer =
         p
 
     let private paragraphPropertiesFull
+        (ctx: Ctx)
         (styleId: string option)
         (format: ParagraphFormat option)
         (numbering: (int * int) option)
+        (markRevision: Revision option)
         : Wordprocessing.ParagraphProperties option =
         let basePr = paragraphPropertiesOf styleId format
 
-        match numbering with
-        | None -> basePr
-        | Some(numId, level) ->
-            let pPr = basePr |> Option.defaultValue (Wordprocessing.ParagraphProperties())
-            pPr.NumberingProperties <- Wordprocessing.NumberingProperties(Wordprocessing.NumberingLevelReference(Val = Int32Value level), Wordprocessing.NumberingId(Val = Int32Value numId))
+        let withNumbering =
+            match numbering with
+            | None -> basePr
+            | Some(numId, level) ->
+                let pPr = basePr |> Option.defaultValue (Wordprocessing.ParagraphProperties())
+                pPr.NumberingProperties <- Wordprocessing.NumberingProperties(Wordprocessing.NumberingLevelReference(Val = Int32Value level), Wordprocessing.NumberingId(Val = Int32Value numId))
+                Some pPr
+
+        // The paragraph MARK's own revision (`w:pPr/w:rPr/w:ins`|`w:del`) - distinct from
+        // any `TrackedChange` wrapping the paragraph's own `Inlines`, which marks the
+        // *content* rather than the mark. `Inserted`/`Deleted` here are the SDK's leaf flag
+        // classes (author/date/id attributes only) - a different pair of classes from
+        // `InsertedRun`/`DeletedRun`, which wrap actual run content elsewhere in this file.
+        match markRevision with
+        | None -> withNumbering
+        | Some revision ->
+            let pPr = withNumbering |> Option.defaultValue (Wordprocessing.ParagraphProperties())
+            let id = ctx.NextRevisionId
+            ctx.NextRevisionId <- id + 1
+            let rPr = Wordprocessing.ParagraphMarkRunProperties()
+            let dateVal = DateTimeValue(defaultArg revision.Date DateTime.Now)
+
+            match revision.Kind with
+            | Inserted ->
+                let flag = Wordprocessing.Inserted(Id = StringValue(string id), Author = StringValue revision.Author)
+                flag.Date <- dateVal
+                rPr.Inserted <- flag
+            | Deleted ->
+                let flag = Wordprocessing.Deleted(Id = StringValue(string id), Author = StringValue revision.Author)
+                flag.Date <- dateVal
+                rPr.Deleted <- flag
+
+            pPr.ParagraphMarkRunProperties <- rPr
             Some pPr
 
     /// Assigns a fresh comment id, builds its `word/comments.xml` metadata entry, and adds
@@ -226,7 +274,7 @@ module Writer =
 
     let rec private inlineToElements (ctx: Ctx) (inl: Inline) : OpenXmlElement list =
         match inl with
-        | Run(text, style, styleId) -> [ textRun text style styleId :> OpenXmlElement ]
+        | Run(text, style, styleId) -> [ textRun ctx text style styleId :> OpenXmlElement ]
         | LineBreak -> [ runWith (Wordprocessing.Break(Type = EnumValue Wordprocessing.BreakValues.TextWrapping)) :> OpenXmlElement ]
         | Tab -> [ runWith (Wordprocessing.TabChar()) :> OpenXmlElement ]
         | PageBreak -> [ runWith (Wordprocessing.Break(Type = EnumValue Wordprocessing.BreakValues.Page)) :> OpenXmlElement ]
@@ -283,6 +331,27 @@ module Writer =
                 [ Wordprocessing.CommentRangeEnd(Id = StringValue idStr) :> OpenXmlElement
                   runWith (Wordprocessing.CommentReference(Id = StringValue idStr)) :> OpenXmlElement ]
             | false, _ -> failwithf "CommentRangeEnd %s has no matching CommentRangeStart" callerId
+        | TrackedChange(revision, content) ->
+            let id = ctx.NextRevisionId
+            ctx.NextRevisionId <- id + 1
+            let dateVal = DateTimeValue(defaultArg revision.Date DateTime.Now)
+
+            match revision.Kind with
+            | Inserted ->
+                let wrapper = Wordprocessing.InsertedRun(Id = StringValue(string id), Author = StringValue revision.Author)
+                wrapper.Date <- dateVal
+                let contentEls = content |> List.collect (inlineToElements ctx)
+                contentEls |> List.iter (wrapper.AppendChild >> ignore)
+                [ wrapper :> OpenXmlElement ]
+            | Deleted ->
+                let wrapper = Wordprocessing.DeletedRun(Id = StringValue(string id), Author = StringValue revision.Author)
+                wrapper.Date <- dateVal
+                let wasInsideDeletion = ctx.InsideDeletion
+                ctx.InsideDeletion <- true
+                let contentEls = content |> List.collect (inlineToElements ctx)
+                ctx.InsideDeletion <- wasInsideDeletion
+                contentEls |> List.iter (wrapper.AppendChild >> ignore)
+                [ wrapper :> OpenXmlElement ]
         | Field(instruction, cachedResult) ->
             let sf = Wordprocessing.SimpleField(Instruction = StringValue instruction)
             cachedResult |> Option.iter (fun c -> sf.AppendChild(runWith (Wordprocessing.Text(c))) |> ignore)
@@ -331,7 +400,7 @@ module Writer =
 
     and private paragraphToW (ctx: Ctx) (p: Paragraph) : Wordprocessing.Paragraph =
         let para = Wordprocessing.Paragraph()
-        paragraphPropertiesFull p.StyleId p.Format p.Numbering |> Option.iter (fun pPr -> para.ParagraphProperties <- pPr)
+        paragraphPropertiesFull ctx p.StyleId p.Format p.Numbering p.MarkRevision |> Option.iter (fun pPr -> para.ParagraphProperties <- pPr)
         p.Inlines |> List.collect (inlineToElements ctx) |> List.iter (para.AppendChild >> ignore)
         para
 
@@ -668,6 +737,8 @@ module Writer =
               NextDrawingId = 1u
               NextFootnoteId = 1
               NextEndnoteId = 1
+              NextRevisionId = 1
+              InsideDeletion = false
               NeedsEvenAndOddHeaders = false }
 
         let stylesPart = mainPart.AddNewPart<StyleDefinitionsPart>()

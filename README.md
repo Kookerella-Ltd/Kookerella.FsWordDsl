@@ -48,6 +48,9 @@ reasoning and what adding either would look like.
   - `Hyperlinks.fs` - `HyperlinkTarget` (external URL vs. internal bookmark reference).
   - `Protection.fs` - `EditRestriction` and `DocumentProtection`, document-level (Word has
     no per-section equivalent of Excel's per-sheet protection).
+  - `Revisions.fs` - `RevisionKind`/`Revision` for track changes (`Inline.TrackedChange`,
+    `Paragraph.MarkRevision`) - narrowly scoped to inserted/deleted content and paragraph
+    marks, see `MAPPING.md` for what isn't covered.
   - `PageSetup.fs` - `PageOrientation`, `PageSize`, `PageMargins`, `SectionBreakType`,
     `NoteNumberRestart`/`NoteNumberingSettings` (a section's own footnote/endnote
     numbering).
@@ -63,7 +66,8 @@ reasoning and what adding either would look like.
   - `Model.fs` - the recursive content model: `Inline` (runs, breaks, images, hyperlinks,
     bookmarks and comments - both the single-paragraph `Bookmark`/`Comment` cases and the
     cross-paragraph `BookmarkRangeStart`/`End`/`CommentRangeStart`/`End` markers, simple
-    fields, footnotes/endnotes), `Paragraph`, `Block` (paragraph or table), `TableCell`/
+    fields, footnotes/endnotes, and `TrackedChange` for track changes), `Paragraph`
+    (including `MarkRevision`), `Block` (paragraph or table), `TableCell`/
     `TableRow` (including `RepeatAsHeader`)/`TableEntry` (including `CellMargins`),
     `HeaderFooterSet`,
     `SectionProperties` (including `BreakType` and `FootnoteNumbering`/
@@ -80,10 +84,11 @@ reasoning and what adding either would look like.
   - `Builders.fs` - plain functional constructors (`section`, `document`, `withStyles`,
     `withNumbering`, `withProtection`, `withVbaProject`, `withDocumentProperties`,
     `withTableStyles`, `bulletListDef`, `numberedListDef`, `multiLevelNumberedListDef`)
-    plus `DocumentDsl` - smart constructors (`run`, `para`, `hyperlink`, `bookmark`,
-    `comment`, `image`, `footnote`, `endnote`, `tableCell`, `tableRow` (with
-    `height`/`repeatAsHeader`), `table` (with `style`/`borders`/`cellMargins`)) with real
-    optional parameters, the Word analog of the Excel repo's `SheetDsl`.
+    plus `DocumentDsl` - smart constructors (`run`, `para` (with `markRevision`),
+    `hyperlink`, `bookmark`, `comment`, `inserted`/`deleted` (track changes), `image`,
+    `footnote`, `endnote`, `tableCell`, `tableRow` (with `height`/`repeatAsHeader`),
+    `table` (with `style`/`borders`/`cellMargins`)) with real optional parameters, the
+    Word analog of the Excel repo's `SheetDsl`.
   - `Interpreter/StyleRegistry.fs` - shared run/paragraph/border/color conversions plus
     `Document.Styles` <-> `styles.xml` (internal).
   - `Interpreter/ImageWriter.fs` / `ImageReader.fs` - an inline image's own DSL <->
@@ -321,6 +326,22 @@ document
     [ section
           [ para [ CommentRangeStart("review1", "Alex", None, None, "This section needs review."); run "Comment starts here" ]
             para [ run "and ends here."; CommentRangeEnd "review1" ] ] ]
+```
+
+Track changes (`inserted`/`deleted`) wrap inline content the same way, marking it as
+inserted or deleted under an author and date; a whole inserted or deleted paragraph
+(rather than just some of its content) uses `para`'s own `markRevision` instead, for the
+paragraph's closing mark:
+
+```fsharp
+para
+    [ run "The quick "
+      inserted ([ run "brown " ], "Alex")
+      run "fox jumps over the "
+      deleted ([ run "lazy " ], "Alex")
+      run "dog." ]
+
+para ([ run "This whole paragraph was inserted." ], markRevision = { Kind = Inserted; Author = "Alex"; Date = None })
 ```
 
 Document-level protection, macros, and core properties are all pipe-friendly, same shape as

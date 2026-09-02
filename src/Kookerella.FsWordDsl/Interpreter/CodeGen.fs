@@ -156,6 +156,9 @@ module CodeGen =
         | ExternalUrl u -> sprintf "ExternalUrl %s" (quote u)
         | InternalBookmark n -> sprintf "InternalBookmark %s" (quote n)
 
+    let private renderRevision (r: Revision) : string =
+        sprintf "{ Kind = %A; Author = %s; Date = %s }" r.Kind (quote r.Author) (renderOption (fun (d: System.DateTime) -> sprintf "System.DateTime.Parse(%s)" (quote (d.ToString("o")))) r.Date)
+
     let rec private renderInline (i: Inline) : string =
         match i with
         | Run(text, style, styleId) -> sprintf "Run(%s, %s, %s)" (quote text) (renderOption renderRunStyle style) (renderOption quote styleId)
@@ -175,6 +178,7 @@ module CodeGen =
             let dateStr = renderOption (fun (d: System.DateTime) -> sprintf "System.DateTime.Parse(%s)" (quote (d.ToString("o")))) date
             sprintf "CommentRangeStart(%s, %s, %s, %s, %s)" (quote id) (quote author) (renderOption quote initials) dateStr (quote text)
         | CommentRangeEnd id -> sprintf "CommentRangeEnd(%s)" (quote id)
+        | TrackedChange(revision, content) -> sprintf "TrackedChange(%s, %s)" (renderRevision revision) (renderList renderInline content)
         | Field(instr, cached) -> sprintf "Field(%s, %s)" (quote instr) (renderOption quote cached)
         | Footnote content -> sprintf "Footnote(%s)" (renderList renderBlock content)
         | Endnote content -> sprintf "Endnote(%s)" (renderList renderBlock content)
@@ -186,11 +190,12 @@ module CodeGen =
 
     and private renderParagraph (p: Paragraph) : string =
         sprintf
-            "{ Inlines = %s; StyleId = %s; Format = %s; Numbering = %s }"
+            "{ Inlines = %s; StyleId = %s; Format = %s; Numbering = %s; MarkRevision = %s }"
             (renderList renderInline p.Inlines)
             (renderOption quote p.StyleId)
             (renderOption renderParagraphFormat p.Format)
             (renderOption (renderTuple2 string string) p.Numbering)
+            (renderOption renderRevision p.MarkRevision)
 
     and private renderBlock (b: Block) : string =
         match b with

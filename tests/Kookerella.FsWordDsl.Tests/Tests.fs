@@ -418,6 +418,27 @@ let ``Comments_MultiParagraph`` () =
     verifyScenarioNamed "Comments_MultiParagraph" "output.docx" doc
 
 [<Fact>]
+let ``TrackedChanges`` () =
+    let editDate = DateTime(2024, 3, 1, 14, 0, 0)
+
+    let doc =
+        document
+            [ section
+                  [ para
+                        [ run "The quick "
+                          inserted ([ run "brown " ], "Alex", editDate)
+                          run "fox jumps over the "
+                          deleted ([ run "lazy " ], "Alex", editDate)
+                          run "dog." ]
+                    para
+                        (
+                            [ run "This whole paragraph was inserted." ],
+                            markRevision = { Kind = Inserted; Author = "Alex"; Date = Some editDate }
+                        ) ] ]
+
+    verifyScenarioNamed "TrackedChanges" "output.docx" doc
+
+[<Fact>]
 let ``FootnotesAndEndnotes`` () =
     let props =
         { SectionProperties.Default with
@@ -672,6 +693,7 @@ let ``Reader tolerates unmodeled body-level content instead of throwing`` () =
 [<InlineData("Hyperlink_Internal")>]
 [<InlineData("Comments")>]
 [<InlineData("Comments_MultiParagraph")>]
+[<InlineData("TrackedChanges")>]
 [<InlineData("FootnotesAndEndnotes")>]
 [<InlineData("PageSetupLandscape")>]
 [<InlineData("HeaderFooterDefault")>]

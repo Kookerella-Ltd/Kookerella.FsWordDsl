@@ -452,6 +452,23 @@ module Json =
           Margins = prop "margins" o |> Option.map cellMarginsOfJson }
 
     // `inlineToJson`/`inlineOfJson` need `blockToJson`/`blockOfJson` (a `Footnote`/
+    let private revisionKindToStr (k: RevisionKind) : string =
+        match k with
+        | Inserted -> "inserted"
+        | Deleted -> "deleted"
+
+    let private revisionKindOfStr (s: string) : RevisionKind = if s = "deleted" then Deleted else Inserted
+
+    /// Shared by `Inline.TrackedChange` (below) and `Paragraph.MarkRevision` - same
+    /// `kind`/`author`/`date` shape either way.
+    let private revisionOfJson (o: JsonObject) : Revision =
+        { Kind = str "kind" o |> Option.map revisionKindOfStr |> Option.defaultValue Inserted
+          Author = str "author" o |> Option.defaultValue ""
+          Date = str "date" o |> Option.map DateTime.Parse }
+
+    let private markRevisionToJson (r: Revision) : JsonNode =
+        obj_ [ "kind", Some(jstr (revisionKindToStr r.Kind)); "author", Some(jstr r.Author); "date", r.Date |> Option.map (fun d -> jstr (d.ToString("o"))) ] :> JsonNode
+
     // `Endnote`'s own body is a `Block list`), which need `paragraphToJson`/
     // `paragraphOfJson`, which need `inlineToJson`/`inlineOfJson` back for a paragraph's
     // own `Inlines` - one `rec ... and ...` chain, same cycle `Xml.fs`'s equivalent
@@ -506,6 +523,18 @@ module Json =
                   ) ]
             :> JsonNode
         | CommentRangeEnd id -> obj_ [ "commentRangeEnd", Some(jstr id) ] :> JsonNode
+        | TrackedChange(revision, content) ->
+            obj_
+                [ "trackedChange",
+                  Some(
+                      obj_
+                          [ "kind", Some(jstr (revisionKindToStr revision.Kind))
+                            "author", Some(jstr revision.Author)
+                            "date", revision.Date |> Option.map (fun d -> jstr (d.ToString("o")))
+                            "content", Some(JsonArray(content |> List.map inlineToJson |> Array.ofList)) ]
+                      :> JsonNode
+                  ) ]
+            :> JsonNode
         | Field(instr, cached) ->
             obj_ [ "field", Some(obj_ [ "instruction", Some(jstr instr); "cachedResult", cached |> Option.map jstr ] :> JsonNode) ] :> JsonNode
         | Footnote content -> obj_ [ "footnote", Some(JsonArray(content |> List.map blockToJson |> Array.ofList) :> JsonNode) ] :> JsonNode
@@ -546,6 +575,9 @@ module Json =
                 CommentRangeStart(str "id" c |> Option.get, str "author" c |> Option.get, str "initials" c, str "date" c |> Option.map DateTime.Parse, str "text" c |> Option.get)
             elif not (isNull o.["commentRangeEnd"]) then
                 CommentRangeEnd(o.["commentRangeEnd"].GetValue<string>())
+            elif not (isNull o.["trackedChange"]) then
+                let t = o.["trackedChange"].AsObject()
+                TrackedChange(revisionOfJson t, arr "content" t |> List.map inlineOfJson)
             elif not (isNull o.["field"]) then
                 let f = o.["field"].AsObject()
                 Field(str "instruction" f |> Option.get, str "cachedResult" f)
@@ -562,6 +594,7 @@ module Json =
               "format", p.Format |> Option.map paragraphFormatToJson
               "numId", p.Numbering |> Option.map (fst >> jint)
               "level", p.Numbering |> Option.map (snd >> jint)
+              "markRevision", p.MarkRevision |> Option.map markRevisionToJson
               "inlines", Some(JsonArray(p.Inlines |> List.map inlineToJson |> Array.ofList)) ]
         :> JsonNode
 
@@ -569,6 +602,7 @@ module Json =
         { Inlines = arr "inlines" o |> List.map inlineOfJson
           StyleId = str "styleId" o
           Format = prop "format" o |> Option.map paragraphFormatOfJson
+          MarkRevision = prop "markRevision" o |> Option.map revisionOfJson
           Numbering = match intg "numId" o, intg "level" o with
                       | Some n, Some l -> Some(n, l)
                       | _ -> None }

@@ -20,7 +20,8 @@ let private minimalDocument: Document =
                     { Inlines = [ Run("Hello, World!", Some { RunStyle.Default with Bold = true }, None) ]
                       StyleId = None
                       Format = None
-                      Numbering = None } ] ]
+                      Numbering = None
+                      MarkRevision = None } ] ]
 
 [<Fact>]
 let ``Xml round trips a minimal document`` () =

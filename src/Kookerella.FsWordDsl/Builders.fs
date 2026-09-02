@@ -100,13 +100,15 @@ type DocumentDsl =
             inlines: Inline list,
             ?styleId: string,
             ?format: ParagraphFormat,
-            ?numbering: int * int
+            ?numbering: int * int,
+            ?markRevision: Revision
         ) : Block =
         ParagraphBlock
             { Inlines = inlines
               StyleId = styleId
               Format = format
-              Numbering = numbering }
+              Numbering = numbering
+              MarkRevision = markRevision }
 
     /// A hyperlink over plain text - applies `BuiltInStyles.hyperlinkCharStyle` (blue,
     /// underlined) automatically so callers don't have to restate it on every run.
@@ -137,15 +139,24 @@ type DocumentDsl =
     /// body's own paragraph, same "caller doesn't restate the built-in id" convenience
     /// `hyperlink`'s text overload gives.
     static member footnote(text: string) : Inline =
-        Footnote [ ParagraphBlock { Inlines = [ Run(text, None, None) ]; StyleId = Some BuiltInStyles.footnoteTextStyle.Id; Format = None; Numbering = None } ]
+        Footnote [ ParagraphBlock { Inlines = [ Run(text, None, None) ]; StyleId = Some BuiltInStyles.footnoteTextStyle.Id; Format = None; Numbering = None; MarkRevision = None } ]
 
     /// A footnote wrapping already-built body content (several paragraphs, or a table).
     static member footnote(content: Block list) : Inline = Footnote content
 
     static member endnote(text: string) : Inline =
-        Endnote [ ParagraphBlock { Inlines = [ Run(text, None, None) ]; StyleId = Some BuiltInStyles.endnoteTextStyle.Id; Format = None; Numbering = None } ]
+        Endnote [ ParagraphBlock { Inlines = [ Run(text, None, None) ]; StyleId = Some BuiltInStyles.endnoteTextStyle.Id; Format = None; Numbering = None; MarkRevision = None } ]
 
     static member endnote(content: Block list) : Inline = Endnote content
+
+    /// Marks `content` as inserted under track changes (`w:ins`) - `date` defaults to
+    /// "now" at write time when omitted, same convention `comment`'s own `date` uses.
+    static member inserted(content: Inline list, author: string, ?date: DateTime) : Inline =
+        TrackedChange({ Kind = Inserted; Author = author; Date = date }, content)
+
+    /// Marks `content` as deleted under track changes (`w:del`).
+    static member deleted(content: Inline list, author: string, ?date: DateTime) : Inline =
+        TrackedChange({ Kind = Deleted; Author = author; Date = date }, content)
 
     static member tableCell(content: Block list, ?props: TableCellProps) : TableCell =
         { Content = content

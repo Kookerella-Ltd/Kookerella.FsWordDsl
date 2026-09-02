@@ -39,6 +39,7 @@
     <Compile Include="Numbering.fs" />
     <Compile Include="Hyperlinks.fs" />
     <Compile Include="Protection.fs" />
+    <Compile Include="Revisions.fs" />
     <Compile Include="PageSetup.fs" />
     <Compile Include="Tables.fs" />
     <Compile Include="Images.fs" />

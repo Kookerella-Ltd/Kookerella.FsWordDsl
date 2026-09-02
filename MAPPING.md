@@ -158,12 +158,26 @@ contains something unmodeled:
   (`docProps/app.xml`, via `ExtendedFilePropertiesPart`) - only written/read when at least
   one is set (`DocumentProperties.Default` round-trips to nothing on disk, same "all-defaults
   reads back as absent" discipline the rest of this DSL follows).
+- **Track changes** (`w:ins`/`w:del`), narrowly scoped to the case that actually matters for
+  almost every real redlined document: `Inline.TrackedChange` wraps arbitrary inline content
+  the same way `Bookmark`/`Comment` do, marking it inserted or deleted with an author and a
+  date; `Paragraph.MarkRevision` separately tracks whether the paragraph's own closing mark
+  (not its content) was inserted or deleted. A run inside a `Deleted` `TrackedChange` writes
+  its text as `w:delText` rather than `w:t` (schema-required) and reads back identically to
+  an ordinary `Run` either way - the surrounding `TrackedChange` wrapper is what actually
+  carries the deleted-ness, not the run itself. See the gap below on what's deliberately not
+  covered (formatting-change history, moves, table row/cell tracking).
 
 ## Known gaps (documented, not silently "supported")
 
-- **Track changes.** Insertions, deletions, and other revision marks aren't modeled at
-  all - a document is always written (and read) as if "accept all changes" had already
-  been applied.
+- **Track changes beyond inserted/deleted content and paragraph marks.** Formatting-change
+  history (`w:rPrChange`/`w:pPrChange` - the run/paragraph formatting a revision *replaced*,
+  for Word's own compare/undo view), moves (`w:moveFrom`/`w:moveTo` - Word's own "this looks
+  like cut+paste" detection; without it, a moved block just round-trips as an ordinary
+  delete-in-the-old-spot plus insert-in-the-new-spot, which is still correct information,
+  just not the special annotation), and table row/cell-level insertion/deletion tracking
+  (`w:trPr/w:ins`, `w:tcPr/w:cellIns`) aren't modeled - see "Modeled faithfully" above for
+  what is.
 - **Content controls (structured document tags), and `w:customXml` wrappers.** This DSL
   doesn't model the control itself (tag/title/lock/placeholder/data binding, dropdown/
   date/checkbox/... variants) - none of that is authored, and none of it survives a

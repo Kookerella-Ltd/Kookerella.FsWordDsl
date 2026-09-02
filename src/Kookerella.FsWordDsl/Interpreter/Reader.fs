@@ -128,6 +128,11 @@ module Reader =
             |> Seq.choose (fun c ->
                 match c with
                 | :? Wordprocessing.Text as t -> Some(Run(t.Text, style, styleId))
+                // A run inside `w:del` uses `w:delText` instead of `w:t` for its own text -
+                // same run properties/styling either way, so this reads back as an
+                // ordinary `Run`, same as `Text` above (the surrounding `TrackedChange`
+                // wrapper, read separately below, is what actually marks it as deleted).
+                | :? Wordprocessing.DeletedText as dt -> Some(Run(dt.Text, style, styleId))
                 | :? Wordprocessing.Break as b ->
                     if b.Type |> opt |> Option.map (fun v -> v.Value) = Some Wordprocessing.BreakValues.Page then
                         Some PageBreak
@@ -260,6 +265,18 @@ module Reader =
 
                 result.Add(Hyperlink(target, innerInlines, tooltip))
                 i <- i + 1
+            | :? Wordprocessing.InsertedRun as ins ->
+                let children = ins.ChildElements |> Seq.cast<OpenXmlElement> |> Array.ofSeq
+                let content = parseInlineRange children 0 children.Length mainPart rctx
+                let revision = { Kind = Inserted; Author = ins.Author.Value; Date = ins.Date |> opt |> Option.map (fun v -> v.Value) }
+                result.Add(TrackedChange(revision, content))
+                i <- i + 1
+            | :? Wordprocessing.DeletedRun as del ->
+                let children = del.ChildElements |> Seq.cast<OpenXmlElement> |> Array.ofSeq
+                let content = parseInlineRange children 0 children.Length mainPart rctx
+                let revision = { Kind = Deleted; Author = del.Author.Value; Date = del.Date |> opt |> Option.map (fun v -> v.Value) }
+                result.Add(TrackedChange(revision, content))
+                i <- i + 1
             | :? Wordprocessing.Run as r ->
                 let footnoteRef = r.Elements<Wordprocessing.FootnoteReference>() |> Seq.tryHead
                 let endnoteRef = r.Elements<Wordprocessing.EndnoteReference>() |> Seq.tryHead
@@ -286,10 +303,26 @@ module Reader =
 
     // --- Paragraphs / tables -----------------------------------------------------------------
 
+    /// The paragraph MARK's own revision (`w:pPr/w:rPr/w:ins`|`w:del`) - not the paragraph's
+    /// `Inlines`, which are tracked (if at all) via `Inline.TrackedChange` instead. `Inserted`/
+    /// `Deleted` here are the SDK's leaf flag classes (author/date/id attributes only, no
+    /// children) - a different pair of classes from `InsertedRun`/`DeletedRun`, which wrap
+    /// actual run content elsewhere in `parseInlineRange` - same same-element-name-different-
+    /// class trap this SDK has throughout (see `CLAUDE.md`).
+    let private markRevisionOfProperties (pPr: Wordprocessing.ParagraphProperties option) : Revision option =
+        pPr
+        |> Option.bind (fun p -> p.ParagraphMarkRunProperties |> opt)
+        |> Option.bind (fun rPr ->
+            match rPr.Inserted |> opt, rPr.Deleted |> opt with
+            | Some ins, _ -> Some { Kind = Inserted; Author = ins.Author.Value; Date = ins.Date |> opt |> Option.map (fun v -> v.Value) }
+            | _, Some del -> Some { Kind = Deleted; Author = del.Author.Value; Date = del.Date |> opt |> Option.map (fun v -> v.Value) }
+            | None, None -> None)
+
     let private readParagraph (mainPart: MainDocumentPart) (rctx: ReadCtx) (p: Wordprocessing.Paragraph) : Paragraph =
         let pPr = p.ParagraphProperties |> opt
         let styleId = styleIdOfParagraphProperties pPr
         let format = paragraphFormatOfProperties pPr
+        let markRevision = markRevisionOfProperties pPr
 
         let numbering =
             pPr
@@ -307,7 +340,8 @@ module Reader =
         { Inlines = parseInlineRange elements 0 elements.Length mainPart rctx
           StyleId = styleId
           Format = format
-          Numbering = numbering }
+          Numbering = numbering
+          MarkRevision = markRevision }
 
     let private tableStyleRefOfW (tblPr: Wordprocessing.TableProperties option) : TableStyleRef option =
         tblPr
