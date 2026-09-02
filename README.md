@@ -27,9 +27,10 @@ rather not touch F# discriminated unions/option types directly - immutable recor
 `With*` builders, plus its own `CsCodeGen` decompiler that renders a `Document` back out as
 runnable C# source. See ["## The C# wrapper"](#the-c-wrapper) below.
 
-**Scope note**: this repo doesn't ship an MCP server yet (unlike the Excel repo, which has
-one alongside its F# core and C# wrapper). See [CLAUDE.md](CLAUDE.md) for what adding one
-would look like.
+**An MCP server** (`Kookerella.FsWordDsl.Mcp`) exposes the same read/write/decompile
+capabilities as tools any MCP-compatible AI agent can call directly, and doubles as a plain
+CLI (`fsworddsl-mcp convert`/`build`) for anyone not going through an MCP client at all -
+see [its own README](src/Kookerella.FsWordDsl.Mcp/README.md) for the full tool list.
 
 ## Layout
 
@@ -115,6 +116,11 @@ would look like.
   types one-for-one, `DocumentConverter.cs` (internal, the two-way F#<->C# translation),
   `DocumentIO.cs` (`Save`/`Load`, the one place this project does I/O), `CsCodeGen.cs` (DSL
   -> C# *source text*, the C# analog of `Interpreter/CodeGen.fs`).
+- `src/Kookerella.FsWordDsl.Mcp` - the MCP server (see [its own README](src/Kookerella.FsWordDsl.Mcp/README.md)):
+  `DocumentTools.fs` (the tool surface, one `[<McpServerTool>]`-tagged member per tool),
+  `Program.fs` (dispatches to the MCP stdio server, or to a plain `convert`/`build` CLI,
+  depending on `argv`). Distributed as a `dotnet tool` (`fsworddsl-mcp`), same as the Excel
+  sibling's own `Kookerella.FsOpenXmlDsl.Mcp`.
 - `tests/Kookerella.FsWordDsl.Tests` - one test per feature, each validating the produced
   file against the OOXML schema (`DocumentFormat.OpenXml.Validation.OpenXmlValidator`) and
   asserting an exact round trip back through the DSL. Each test also writes the document it

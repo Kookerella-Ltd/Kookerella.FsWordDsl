@@ -14,9 +14,9 @@ namespace Kookerella.CsWordDsl;
 /// sibling Kookerella.CsOpenXmlDsl project's own <c>CsCodeGen</c>.
 /// <para>
 /// The emitted file targets .NET's "file-based apps" feature (<c>dotnet run script.cs</c>)
-/// rather than a traditional project - <paramref name="referenceLines"/> on <see
-/// cref="Generate"/> is whatever raw <c>#:package</c>/<c>#:project</c> directives the
-/// caller needs so the file can locate this assembly; this class has no opinion on that.
+/// rather than a traditional project - <see cref="Generate"/>'s own <c>referenceLines</c>
+/// parameter is whatever raw <c>#:package</c>/<c>#:project</c> directives the caller needs
+/// so the file can locate this assembly; this class has no opinion on that.
 /// </para>
 /// </summary>
 public static class CsCodeGen

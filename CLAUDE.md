@@ -4,11 +4,8 @@ Instructions for any Claude Code session working in this repo.
 
 ## Repo layout
 
-This repo ships **the F# core plus a fluent C# wrapper** - no MCP server yet (compare
-`Kookerella.FsOpenXmlDsl`, the Excel analog this repo was built to mirror, which has all
-three). Don't assume the MCP server exists; if you're asked to add one, that's a new
-package under `src/`, following the pattern `Kookerella.FsOpenXmlDsl.Mcp` does in that repo
-- not an extension of what's here.
+This repo ships **the F# core, a fluent C# wrapper, and an MCP server** - full parity with
+`Kookerella.FsOpenXmlDsl`, the Excel analog this repo was built to mirror.
 
 - `src/Kookerella.FsWordDsl` - the F# core: a typesafe DSL over the WordprocessingML
   schema, interpreted by `Interpreter/Writer.fs` and reversed by `Interpreter/Reader.fs`.
@@ -19,6 +16,16 @@ package under `src/`, following the pattern `Kookerella.FsOpenXmlDsl.Mcp` does i
   the F#-compiled-shape gotchas this needed (DU cases as `New<Case>` static factories/
   singleton properties, case field names keeping their F#-source lowercase casing unlike a
   plain record's PascalCase properties, tuples as `System.Tuple`, not `ValueTuple`).
+- `src/Kookerella.FsWordDsl.Mcp` - an MCP (Model Context Protocol) server exposing the F#
+  core's read/write/decompile capabilities as tools (`create_document`/`read_document` -
+  deliberately narrow, plain-paragraph-text only; `generate_fsharp_script`/
+  `generate_csharp_script`/`generate_xml`/`create_document_from_xml`/`generate_json`/
+  `create_document_from_json` - full feature parity; `generate_xml_schema`/
+  `generate_json_schema`). The same binary is also a plain CLI (`fsworddsl-mcp
+  convert`/`build`) for callers not going through an MCP client - `Program.fs`'s
+  `[<EntryPoint>]` dispatches on `argv`'s first token (`"convert"`/`"build"`/otherwise ->
+  MCP stdio server). `DocumentTools.fs` is the tool surface, one `[<McpServerTool>]`-tagged
+  static member per tool, mirroring the Excel sibling's own `WorkbookTools.fs` file-for-file.
 - `tests/Kookerella.FsWordDsl.Tests` - one scenario per feature under `Examples/`, each
   validated against the real OOXML schema and round-tripped exactly back through the DSL.
 - `tests/Kookerella.CsWordDsl.Tests` - `DriftGuardTests.cs` (a reflection-based tripwire
@@ -28,7 +35,11 @@ package under `src/`, following the pattern `Kookerella.FsOpenXmlDsl.Mcp` does i
   free), `ExampleTests.cs` (reloads the F# suite's own `Examples/*/output.docx` fixtures
   rather than re-authoring every scenario), `CsCodeGenTests.cs` (actually executes a
   generated file via `dotnet run --file`, the C# analog of the F# suite's `Category=Slow`
-  `dotnet fsi` group).
+  `dotnet fsi` group). There's no dedicated test project for the Mcp server, matching the
+  Excel sibling's own posture - verify it by hand (`dotnet build` then either the CLI
+  `convert`/`build` subcommands directly, or a real JSON-RPC handshake over stdio) after
+  any change, the same "run the actual thing" discipline this file's own Process
+  discipline section already asks for everywhere else.
 - `samples/Kookerella.FsWordDsl.Sample` - a small console app exercising the F# DSL end to
   end (build, save, reload).
 
@@ -126,3 +137,10 @@ qualification scheme avoids.
 - `dotnet test tests/Kookerella.CsWordDsl.Tests` - the C# wrapper's own suite (no
   fast/slow split; `CsCodeGenTests.cs` shells out to `dotnet run --file` itself, so a
   single `dotnet test` run already covers the C# analog of the F# suite's slow group).
+- The Mcp server has no dedicated test project - after any change there, at minimum
+  `dotnet build src/Kookerella.FsWordDsl.Mcp` plus one CLI smoke test, e.g. `dotnet
+  <path-to-Mcp.dll> convert <some Examples/*/output.docx> --lang json`. To verify the
+  actual MCP stdio transport (not just the tool logic underneath it, which the CLI path
+  already exercises), pipe a real JSON-RPC `initialize` + `tools/list` request pair in and
+  confirm both get a `result` back - watch for Windows path strings needing `\\` (doubled)
+  in the JSON, not a single `\`, which fails to parse rather than failing at the tool call.

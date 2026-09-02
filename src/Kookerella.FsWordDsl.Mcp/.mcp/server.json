@@ -1,0 +1,24 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.MarkNicholls/fsworddsl-mcp",
+  "version": "0.1.0",
+  "description": "Word tools for AI agents: read/write, decompile to F#/C#/XML/JSON, or build from XML/JSON.",
+  "title": "Word MCP Server (FsWordDsl)",
+  "websiteUrl": "https://github.com/Kookerella-Ltd/Kookerella.FsWordDsl/tree/master/src/Kookerella.FsWordDsl.Mcp",
+  "packages": [
+    {
+      "registryType": "nuget",
+      "identifier": "Kookerella.FsWordDsl.Mcp",
+      "version": "0.1.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "packageArguments": [],
+      "environmentVariables": []
+    }
+  ],
+  "repository": {
+    "url": "https://github.com/Kookerella-Ltd/Kookerella.FsWordDsl",
+    "source": "github"
+  }
+}

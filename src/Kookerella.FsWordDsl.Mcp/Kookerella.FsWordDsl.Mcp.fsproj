@@ -1,0 +1,62 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <!-- Publishes as a `dotnet tool` (`dotnet tool install -g Kookerella.FsWordDsl.Mcp`)
+         rather than a plain console app - the natural distribution shape for a local MCP
+         server, since an MCP client just needs a command it can launch as a subprocess, not
+         a network address (see the project's own README for why this runs locally rather
+         than as a hosted service). Mirrors the Excel sibling's own
+         Kookerella.FsOpenXmlDsl.Mcp project exactly. -->
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>fsworddsl-mcp</ToolCommandName>
+    <Version>0.1.0</Version>
+    <Authors>Kookerella</Authors>
+    <Company>Kookerella Ltd</Company>
+    <Description>MCP (Model Context Protocol) server exposing Kookerella.FsWordDsl's Word document capabilities as tools any MCP-compatible AI agent can call directly: build a document, read one back, decompile an existing one into idiomatic F# or C# source, or translate to/from plain XML or JSON, each against a real schema. The XML/JSON directions each have two uses beyond code generation: build a .docx directly from XML/JSON a transform engine (e.g. XSLT) or generation script already produces, no code required; or convert an existing .docx to XML/JSON for text-based diffing and version control in systems like git. The same conversions are available as plain CLI commands (fsworddsl-mcp convert/build) for anyone not going through an MCP client.</Description>
+    <PackageTags>mcp;model-context-protocol;ai;agent;word;docx;openxml;fsharp;dotnet-tool</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageProjectUrl>https://github.com/Kookerella-Ltd/Kookerella.FsWordDsl</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/Kookerella-Ltd/Kookerella.FsWordDsl</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\..\LICENSE" Pack="true" PackagePath="/" />
+    <None Include="README.md" Pack="true" PackagePath="/" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Linked (not copied) so this can't drift from the core project's own copy - see
+         generate_json_schema's own doc string for why this lives here and not embedded in
+         Kookerella.FsWordDsl itself. -->
+    <EmbeddedResource Include="..\Kookerella.FsWordDsl\Json.schema.json" Link="Json.schema.json">
+      <LogicalName>Kookerella.FsWordDsl.Mcp.Json.schema.json</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="DocumentTools.fs" />
+    <Compile Include="Program.fs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="ModelContextProtocol" Version="2.2.0" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.11" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Kookerella.FsWordDsl\Kookerella.FsWordDsl.fsproj" />
+    <!-- Needed only for generate_csharp_script - it loads the document through the C#
+         wrapper's own DocumentIO.Load (rather than the F# core's Document.load) so it can
+         feed a Document the wrapper's own CsCodeGen.Generate understands, without needing
+         DocumentConverter (internal to that assembly) exposed publicly. -->
+    <ProjectReference Include="..\Kookerella.CsWordDsl\Kookerella.CsWordDsl.csproj" />
+  </ItemGroup>
+
+</Project>
