@@ -337,11 +337,32 @@ module Reader =
               InsideHorizontal = tb.InsideHorizontalBorder |> opt |> Option.map borderSideOfInsideH
               InsideVertical = tb.InsideVerticalBorder |> opt |> Option.map borderSideOfInsideV })
 
-    let rec private readBlock (mainPart: MainDocumentPart) (rctx: ReadCtx) (el: OpenXmlElement) : Block =
+    /// Zero-or-more, not exactly one: an unrecognized body/cell-level element is dropped
+    /// (`[]`) rather than failing the whole document, and a content control/custom XML
+    /// wrapper expands to whatever recognized content it wraps. Reading an arbitrary
+    /// real-world `.docx` is meant to be best-effort (see this module's own doc comment) -
+    /// this used to be a lie for anything at block level it didn't recognize, throwing
+    /// instead of degrading, which a `w:sdt` (a content control - extremely common in
+    /// real-world templates: form fields, dropdowns, date pickers) hit constantly.
+    let rec private readBlock (mainPart: MainDocumentPart) (rctx: ReadCtx) (el: OpenXmlElement) : Block list =
         match el with
-        | :? Wordprocessing.Paragraph as p -> ParagraphBlock(readParagraph mainPart rctx p)
-        | :? Wordprocessing.Table as t -> TableBlock(readTable mainPart rctx t)
-        | other -> failwithf "Unexpected body element: %s" (other.GetType().Name)
+        | :? Wordprocessing.Paragraph as p -> [ ParagraphBlock(readParagraph mainPart rctx p) ]
+        | :? Wordprocessing.Table as t -> [ TableBlock(readTable mainPart rctx t) ]
+        | :? Wordprocessing.SdtBlock as sdt ->
+            // This DSL doesn't model content controls themselves (see MAPPING.md) - only
+            // the block content they wrap is recovered, the control wrapper itself
+            // (tag/title/lock/placeholder/data binding, ...) is silently discarded.
+            match sdt.SdtContentBlock |> opt with
+            | Some content -> content.ChildElements |> Seq.collect (readBlock mainPart rctx) |> List.ofSeq
+            | None -> []
+        | :? Wordprocessing.CustomXmlBlock as cx -> cx.ChildElements |> Seq.collect (readBlock mainPart rctx) |> List.ofSeq
+        | _ ->
+            // Anything else unmodeled at block level (`w:altChunk` - an embedded foreign
+            // document format this DSL has no way to parse; a bookmark/comment range
+            // marker placed directly in the body rather than nested in a paragraph;
+            // `w:permStart`/`permEnd`; ...) - dropped, same "best-effort on a foreign
+            // file" posture the rest of `Reader` takes.
+            []
 
     and private readTable (mainPart: MainDocumentPart) (rctx: ReadCtx) (t: Wordprocessing.Table) : TableEntry =
         let tblPr = t.GetFirstChild<Wordprocessing.TableProperties>() |> opt
@@ -409,7 +430,7 @@ module Reader =
                         let content =
                             tc.ChildElements
                             |> Seq.filter (fun c -> not (c :? Wordprocessing.TableCellProperties))
-                            |> Seq.map (readBlock mainPart rctx)
+                            |> Seq.collect (readBlock mainPart rctx)
                             |> List.ofSeq
 
                         { Content = content; Props = props })
@@ -451,8 +472,8 @@ module Reader =
                 |> Seq.map (fun c -> c.CloneNode true)
 
             let strippedPara = Wordprocessing.Paragraph(strippedChildren)
-            readBlock mainPart rctx strippedPara :: (rest |> List.map (readBlock mainPart rctx))
-        | other -> other |> List.map (readBlock mainPart rctx)
+            readBlock mainPart rctx strippedPara @ (rest |> List.collect (readBlock mainPart rctx))
+        | other -> other |> List.collect (readBlock mainPart rctx)
 
     // --- Page setup / headers & footers -------------------------------------------------------
 
@@ -492,12 +513,12 @@ module Reader =
 
     let private readHeaderPart (mainPart: MainDocumentPart) (rctx: ReadCtx) (id: string) : Block list =
         match mainPart.GetPartById(id) with
-        | :? HeaderPart as hp -> hp.Header.ChildElements |> Seq.map (readBlock mainPart rctx) |> List.ofSeq
+        | :? HeaderPart as hp -> hp.Header.ChildElements |> Seq.collect (readBlock mainPart rctx) |> List.ofSeq
         | _ -> []
 
     let private readFooterPart (mainPart: MainDocumentPart) (rctx: ReadCtx) (id: string) : Block list =
         match mainPart.GetPartById(id) with
-        | :? FooterPart as fp -> fp.Footer.ChildElements |> Seq.map (readBlock mainPart rctx) |> List.ofSeq
+        | :? FooterPart as fp -> fp.Footer.ChildElements |> Seq.collect (readBlock mainPart rctx) |> List.ofSeq
         | _ -> []
 
     let private headerFooterSetOfRefs
@@ -605,7 +626,7 @@ module Reader =
         for child in children do
             match child with
             | :? Wordprocessing.SectionProperties as sectPr ->
-                let blocks = currentBlocks |> Seq.map (readBlock mainPart rctx) |> List.ofSeq
+                let blocks = currentBlocks |> Seq.collect (readBlock mainPart rctx) |> List.ofSeq
                 sections.Add({ Body = blocks; Properties = sectionPropertiesOfW mainPart rctx sectPr })
                 currentBlocks.Clear()
             | :? Wordprocessing.Paragraph as p when not (isNull p.ParagraphProperties) && not (isNull p.ParagraphProperties.SectionProperties) ->
@@ -617,7 +638,7 @@ module Reader =
                     strippedPara.PrependChild(strippedPPr) |> ignore
 
                 currentBlocks.Add(strippedPara)
-                let blocks = currentBlocks |> Seq.map (readBlock mainPart rctx) |> List.ofSeq
+                let blocks = currentBlocks |> Seq.collect (readBlock mainPart rctx) |> List.ofSeq
                 sections.Add({ Body = blocks; Properties = sectionPropertiesOfW mainPart rctx sectPr })
                 currentBlocks.Clear()
             | other -> currentBlocks.Add(other)
@@ -625,7 +646,7 @@ module Reader =
         if currentBlocks.Count > 0 then
             // No trailing body-level sectPr (malformed/foreign file) - treat remaining
             // content as one final section with default page setup rather than dropping it.
-            let blocks = currentBlocks |> Seq.map (readBlock mainPart rctx) |> List.ofSeq
+            let blocks = currentBlocks |> Seq.collect (readBlock mainPart rctx) |> List.ofSeq
             sections.Add({ Body = blocks; Properties = SectionProperties.Default })
 
         sections |> List.ofSeq

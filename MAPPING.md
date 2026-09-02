@@ -6,6 +6,28 @@ the DSL models a feature at all. This document lists every place where that mapp
 inexact, lossy, or simply not implemented yet, so you know what to expect from a round trip
 (`Document.save` then `Document.load`) and what would need to be added to close the gap.
 
+## Reading a foreign file
+
+Round-trip correctness is guaranteed and tested against this library's own `Writer` output
+(the `verifyScenarioNamed` harness in `tests/Kookerella.FsWordDsl.Tests/Tests.fs`) - reading
+an arbitrary real-world `.docx` (one Word itself produced, using features this DSL doesn't
+model) is best-effort. Concretely, `Reader` never fails a whole document just because it
+contains something unmodeled:
+- Inside a paragraph, an unrecognized inline-level element (e.g. track-changes `w:ins`/
+  `w:del` wrapping a run) is silently skipped - the surrounding recognized content still
+  reads back fine, but that specific unmodeled content doesn't survive the read.
+- At the document/cell body level, a content control (`w:sdt`) or `w:customXml` wrapper is
+  unwrapped rather than skipped - the paragraphs/tables it wraps are read normally, only
+  the wrapper itself (and whatever metadata it carried) is discarded. Anything else
+  unrecognized there (`w:altChunk`, a bookmark/comment range marker placed directly in the
+  body rather than nested in a paragraph, `w:permStart`/`permEnd`, ...) is dropped the same
+  way the inline case is.
+- `tests/Kookerella.FsWordDsl.Tests/Tests.fs`'s own `Reader tolerates unmodeled body-level
+  content instead of throwing` test builds a file directly against the OOXML SDK
+  (bypassing `Writer` entirely, since there's no DSL-level way to author these constructs)
+  to exercise exactly this - it's the one test in the suite that isn't round-tripped
+  through this DSL's own writer, by design.
+
 ## Modeled faithfully (1:1 or as close as makes sense)
 
 - **Paragraphs and runs**: a `Paragraph`'s `Inlines` hold several independently-styled
@@ -142,7 +164,13 @@ inexact, lossy, or simply not implemented yet, so you know what to expect from a
 - **Track changes.** Insertions, deletions, and other revision marks aren't modeled at
   all - a document is always written (and read) as if "accept all changes" had already
   been applied.
-- **Content controls (structured document tags).** Not modeled.
+- **Content controls (structured document tags), and `w:customXml` wrappers.** This DSL
+  doesn't model the control itself (tag/title/lock/placeholder/data binding, dropdown/
+  date/checkbox/... variants) - none of that is authored, and none of it survives a
+  round trip. `Reader` does still recover the block/inline content a `w:sdt`/`w:customXml`
+  *wraps* when reading a foreign file (unwrapping it rather than failing the whole
+  document, since these are extremely common in real-world templates - see the note below
+  on `Reader`'s own resilience posture).
 - **Real field computation.** Only raw instruction text + a cached display value round-trip
   (see "Modeled faithfully" above) - a table of contents, cross-reference, or any other
   field that depends on document layout is never actually computed by this DSL, unlike

@@ -575,6 +575,82 @@ let ``Table_CustomStyleAndHeaderRow`` () =
 
     verifyScenarioNamed "Table_CustomStyleAndHeaderRow" "output.docx" doc
 
+// --- Reader resilience against foreign files --------------------------------------------
+//
+// Not a `verifyScenarioNamed` scenario like the ones above - there's no DSL-level way to
+// author a content control to begin with (this DSL doesn't model them, see MAPPING.md),
+// so this builds a file directly against the OOXML SDK, bypassing `Writer` entirely, to
+// exercise `Reader` against exactly the kind of foreign construct a real-world template
+// uses constantly.
+
+[<Fact>]
+let ``Reader tolerates unmodeled body-level content instead of throwing`` () =
+    let dir = Path.Combine(examplesDir, "ReaderTolerance")
+    Directory.CreateDirectory(dir) |> ignore
+    let path = Path.Combine(dir, "sdt-and-custom-xml.docx")
+
+    let textRun (text: string) =
+        let r = Wordprocessing.Run()
+        r.AppendChild(Wordprocessing.Text(text)) |> ignore
+        r
+
+    let textParagraph (text: string) =
+        let p = Wordprocessing.Paragraph()
+        p.AppendChild(textRun text) |> ignore
+        p
+
+    do
+        use wordDoc = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document)
+        let mainPart = wordDoc.AddMainDocumentPart()
+        let body = Wordprocessing.Body()
+
+        body.AppendChild(textParagraph "Before the content control.") |> ignore
+
+        // A content control (`w:sdt`) wrapping a paragraph - this used to make `Document.
+        // load` throw outright on the whole file, since `Reader` recognized only `w:p`/
+        // `w:tbl` as direct body children.
+        let sdtContent = Wordprocessing.SdtContentBlock()
+        sdtContent.AppendChild(textParagraph "Inside the content control.") |> ignore
+        let sdt = Wordprocessing.SdtBlock()
+        sdt.AppendChild(sdtContent) |> ignore
+        body.AppendChild(sdt) |> ignore
+
+        // `w:customXml` wrapping a paragraph - same "unmodeled wrapper, recover the real
+        // content inside" treatment.
+        let customXml = Wordprocessing.CustomXmlBlock()
+        customXml.AppendChild(textParagraph "Inside the custom XML wrapper.") |> ignore
+        body.AppendChild(customXml) |> ignore
+
+        // `w:altChunk` - an embedded foreign document format this DSL has no way to parse
+        // at all, so this one really is dropped rather than recovered; the point here is
+        // only that it doesn't take the rest of the file down with it.
+        body.AppendChild(Wordprocessing.AltChunk(Id = StringValue "doesNotExist")) |> ignore
+
+        body.AppendChild(textParagraph "After the content control.") |> ignore
+        body.AppendChild(Wordprocessing.SectionProperties()) |> ignore
+
+        let documentEl = Wordprocessing.Document()
+        documentEl.AppendChild(body) |> ignore
+        mainPart.Document <- documentEl
+
+    let doc = Document.load path
+
+    let texts =
+        doc.Sections
+        |> List.collect (fun s -> s.Body)
+        |> List.choose (function
+            | ParagraphBlock p -> Some p
+            | _ -> None)
+        |> List.collect (fun p -> p.Inlines)
+        |> List.choose (function
+            | Run(text, _, _) -> Some text
+            | _ -> None)
+
+    Assert.Equal<string list>(
+        [ "Before the content control."; "Inside the content control."; "Inside the custom XML wrapper."; "After the content control." ],
+        texts
+    )
+
 // --- Slow: actually execute every generated script.fsx and verify it reproduces the
 // committed example ------------------------------------------------------------------
 
