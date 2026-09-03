@@ -7,18 +7,23 @@ An [MCP](https://modelcontextprotocol.io) (Model Context Protocol) server that e
 MCP-compatible AI agent can call directly - build a document, read one back, or regenerate
 its F#, C#, XML, or JSON representation - without writing any code itself.
 
-**Most Word libraries only go one direction**: build a document from scratch, or mutate an
-existing one, through an imperative object model. This one also goes the other way - read
-any existing `.docx`/`.docm` and hand back idiomatic, runnable F# or C# source (or plain
-XML or JSON, each against a real schema) that rebuilds an equivalent file, and build a new
-one from that XML/JSON directly. A decompiler for Word documents, not just a writer. That's
-available three ways from this one binary: as MCP tools (`generate_fsharp_script`/
-`generate_csharp_script`/`generate_xml`/`create_document_from_xml`/`generate_json`/
-`create_document_from_json`, plus `generate_xml_schema`/`generate_json_schema` for the
-schemas themselves) for an AI agent, as a plain CLI (`fsworddsl-mcp convert`/`build`) for
-anyone who isn't going through an MCP client, and as direct library calls
-(`Document.generateScript`/`CsCodeGen.Generate`/`Xml.toDocument`/`Xml.ofDocument`/
-`Json.toDocument`/`Json.ofDocument`) for either to call themselves.
+**Most Word MCP servers we reviewed take one of two shapes**: a one-directional generator
+(prompt in, `.docx` out, python-docx-style, no way back), or a live-editing bridge that
+drives an actually-open, visible Word window over COM/Office.js/AppleScript - which means a
+real Word/Office install and a running desktop session, every time. This one is neither: it
+needs **no Word or Office installation at all** (the OOXML work happens entirely inside this
+server, via the .NET Open XML SDK, not by remote-controlling an application), and it goes
+*both* directions - read any existing `.docx`/`.docm` and hand back idiomatic, runnable F#
+or C# source (or plain XML or JSON, each against a real schema) that rebuilds an equivalent
+file, and build a new one from that XML/JSON directly. A decompiler for Word documents, not
+just a writer, and not just a remote control for one either. That's available three ways
+from this one binary: as MCP tools (`generate_fsharp_script`/`generate_csharp_script`/
+`generate_xml`/`create_document_from_xml`/`generate_json`/`create_document_from_json`, plus
+`generate_xml_schema`/`generate_json_schema` for the schemas themselves) for an AI agent, as
+a plain CLI (`fsworddsl-mcp convert`/`build`) for anyone who isn't going through an MCP
+client, and as direct library calls (`Document.generateScript`/`CsCodeGen.Generate`/
+`Xml.toDocument`/`Xml.ofDocument`/`Json.toDocument`/`Json.ofDocument`) for either to call
+themselves.
 
 The XML/JSON directions each have two concrete uses beyond code generation: **build a
 `.docx` from XML/JSON a transform engine already produces** (an XSLT pipeline, or any
@@ -26,6 +31,13 @@ templating/generation script, can target Word with no code at all), and **conver
 existing `.docx` to XML/JSON for version control** - `.docx` is a binary ZIP, so `git diff`
 on one is useless, but `generate_xml`/`generate_json`'s output is plain, ordered text, so a
 real content change produces a legible diff instead of an opaque binary one.
+
+The round trip underneath all of this isn't just asserted - `Kookerella.FsWordDsl`'s own
+test suite builds a document, saves it, reads it back, and asserts the result is exactly the
+same DSL structure again, for every feature the library models, not just a happy-path demo.
+The registry listing (`io.github.MarkNicholls/fsworddsl-mcp`) also carries the MCP
+Registry's own **official** status, since this server is published there directly rather
+than only crawled from GitHub.
 
 This runs **locally**, as a subprocess your MCP client launches over stdio - there's no
 hosted service, no network address, and no account to sign up for. It's distributed as a
