@@ -120,9 +120,96 @@ qualification scheme avoids.
   and double-argument OOXML SDK constructor calls silently produced empty or malformed
   elements, caught only by actually running `OpenXmlValidator` and a real round trip, not
   by the code compiling or "looking right" against a Microsoft Learn C# sample.
+- Never let a secret (API key, token) reach a command wrapper that logs its own full
+  argument list - FAKE's `DotNet.exec` does this on every invocation, success or failure.
+  Shell out via a raw process call with a redacted log line instead (see `build.fsx`'s
+  `push` function for the pattern). Verify this by actually running the command and
+  grepping captured output for the secret, not by reading the code and assuming it's safe.
+
+## Release
+
+This repo mirrors its Excel sibling's (`Kookerella.FsOpenXmlDsl`) build/release tooling
+file-for-file - `build.fsx` (FAKE) drives Build/Test/Pack/Push/PublishAll plus the two
+standalone-distribution targets below, with the same reasoning behind every design choice
+documented inline in that file's own comments.
+
+1. Bump `<Version>` by hand in whichever project(s) changed (a semver judgment call, not
+   automated).
+2. Run `dotnet fake run build.fsx -t PublishAll` (runs the full test gate first). **Use
+   `PublishAll`, never `Push<Core|Wrapper|Mcp>` individually, and never a manual `dotnet
+   pack`/`dotnet nuget push`** - `push` (in `build.fsx`) is deliberately a no-op for
+   whichever package(s) didn't change this release, specifically so `PublishAll` is always
+   safe and always the right thing to run. `PublishAll`'s own action then checks nuget.org's
+   live state and fails loudly if either the C# wrapper's published NuGet dependency floor
+   on the F# core, or the Mcp tool's *bundled* core/wrapper DLL versions (it's a
+   self-contained `dotnet tool`, no nuspec dependency floor to check instead), still don't
+   match the latest published core/wrapper versions - independently invocable any time via
+   `dotnet fake run build.fsx -t VerifyDependencyFreshness --single-target`. **This isn't
+   hypothetical**: standing this tooling up for the first time and running
+   `VerifyDependencyFreshness` immediately caught a real case - the same-day
+   `Kookerella.CsWordDsl` 0.1.1 README fix left the already-published
+   `Kookerella.FsWordDsl.Mcp` 0.1.0 bundling a stale `Kookerella.CsWordDsl.dll` 0.1.0.0.
+   NuGet indexing typically takes 5-20 minutes after a successful push before the new
+   version resolves anywhere (search, flatcontainer index, `dotnet restore`) - don't assume
+   a push failed just because it isn't visible yet.
+3. **MCP Registry sync**, only if the Mcp package's version changed: `mcp-publisher login
+   github` (interactive GitHub device-flow - this needs the user, it can't be scripted or
+   run non-interactively) immediately followed by `mcp-publisher publish` from
+   `src/Kookerella.FsWordDsl.Mcp/.mcp/` - the registry JWT is short-lived, so log in again
+   right before publishing rather than reusing an older session. The registry publish will
+   itself reject the request with a clear error if the NuGet version it references isn't
+   indexed yet - that's the signal to wait, not a real failure.
+4. **Standalone binaries / GitHub Release**, only when worth cutting a new platform build:
+   `dotnet fake run build.fsx -t PackMcpSelfContained` (six self-contained single-file
+   executables, one per `win-x64`/`win-arm64`/`linux-x64`/`linux-arm64`/`osx-x64`/
+   `osx-arm64`) and/or `-t PackMcpMcpb` (the same six, repackaged as Claude Desktop's
+   one-click `.mcpb` bundle format - needs `npm install -g @anthropic-ai/mcpb` on PATH
+   first). Deliberately **not** chained into `PublishAll` - uploading these as GitHub
+   Release assets is its own separate, explicitly-triggered step (`gh release create
+   v<version> <assets...>`), the same reasoning as the MCP Registry sync needing a human
+   login: this needs a human decision about when a new platform build is worth cutting, not
+   something that should happen on every NuGet release automatically. Native AOT was tried
+   and rejected empirically for this target, not just assumed impractical - see `build.fsx`'s
+   own comment on `selfContainedRids` for why (F#'s `sprintf`/`printf`/`failwithf` machinery
+   is reflection-based in a way Native AOT's trimmer can't resolve statically).
+
+## Keep these in sync
+
+A version bump or new feature can make any of these stale independently of the others -
+useful as a quick scan regardless of what kind of change is in flight.
+
+| File | What must stay accurate | Checked by |
+|---|---|---|
+| `README.md` (root) | Top summary, per-feature sections, Layout list | Nothing automated - read it |
+| `src/Kookerella.CsWordDsl/README.md` | Feature list, `## Scope` (packed directly into the NuGet listing - verify by unpacking the built `.nupkg`, not just reading source) | Nothing automated |
+| `src/Kookerella.FsWordDsl.Mcp/README.md` | Tool list, `## Scope`, CLI usage (packed directly into the NuGet listing, same caveat) | Nothing automated |
+| `src/Kookerella.FsWordDsl/Kookerella.FsWordDsl.fsproj` `<Description>` | Matches the F# core's actual feature set | Nothing automated - it's NuGet metadata, not code |
+| `src/Kookerella.CsWordDsl/Kookerella.CsWordDsl.csproj` `<Description>` | Matches the C# wrapper's actual feature set | Nothing automated |
+| `src/Kookerella.FsWordDsl.Mcp/Kookerella.FsWordDsl.Mcp.fsproj` `<Description>` | Matches the Mcp server's actual tool/CLI surface | Nothing automated |
+| `src/Kookerella.FsWordDsl.Mcp/.mcp/server.json` | `description` (≤100 chars, registry-enforced) **and** both `version` fields (top-level and `packages[].version`) match the `.fsproj`'s `<Version>` | The registry publish itself rejects a version it can't find on NuGet, and `VerifyDependencyFreshness`/`PublishAll`'s own action (`verifyServerJsonVersion`) checks both version fields against the `.fsproj` - but nothing checks `description` accuracy |
+| `src/Kookerella.FsWordDsl.Mcp/DocumentTools.fs` | Every tool's `[<Description>]` text, and the `DocumentTools` type's own doc comment | Nothing automated - this is what an MCP client/agent actually reads, separate from any README |
+| `src/Kookerella.FsWordDsl.Mcp/Dockerfile` | `COPY` list mirrors every `ProjectReference` in the `.fsproj` exactly | Nothing automated unless someone actually runs `docker build` |
+| `src/Kookerella.FsWordDsl/Xml.xsd` | Matches what `Xml.fs`'s `ofDocument`/`toDocument` actually read and write | `assertXmlSchemaValid` inside `verifyScenarioNamed` - real, but only as strong as the scenarios that exist |
+| Published `Kookerella.CsWordDsl`'s NuGet dependency floor on `Kookerella.FsWordDsl` | Must equal the F# core's latest *published* version, not just whatever's in the local `.fsproj` | `VerifyDependencyFreshness`/`PublishAll`'s own action in `build.fsx` (`verifyWrapperDependencyFloor`) - queries nuget.org's live state directly; only catches it if `PublishAll` (not a standalone `Push*`) is actually what ran |
+| Published `Kookerella.FsWordDsl.Mcp`'s *bundled* `Kookerella.FsWordDsl.dll`/`Kookerella.CsWordDsl.dll` (it's a self-contained `dotnet tool`, no nuspec dependency floor to check instead) | Their assembly versions must equal the core's/wrapper's latest *published* versions | `VerifyDependencyFreshness`/`PublishAll`'s own action in `build.fsx` (`verifyMcpBundleFreshness`) - downloads the live `.nupkg` and reads the bundled DLLs' own version metadata; found live and stale the very first time this check was stood up in this repo (see Release step 2 above) |
+| `src/Kookerella.FsWordDsl/Json.schema.json` | Matches what `Json.fs`'s `ofDocument`/`toDocument` actually read and write | `assertJsonSchemaValid`, called from every `JsonTests.fs` round trip, **and** from `verifyScenarioNamed` for every `Examples/` scenario (writes `document.json`, same as `document.xml`/`Xml.xsd`) - real, but only as strong as the scenarios that exist |
+| `tests/Kookerella.CsWordDsl.Tests/DriftGuardTests.cs`'s enum/closed-hierarchy mirror lists | Lists every F# DU mirrored as a C# enum/closed hierarchy | Only guards types already registered with it - a brand-new type is invisible until added |
+| `MAPPING.md` | What the F# core maps 1:1 vs. approximates vs. doesn't model | Nothing automated - only touch this for a new OOXML-level capability, not a wrapper-level one |
+
+Three packages, three `.fsproj`/`.csproj` `<Version>` fields, one `server.json` with two
+more copies of one of those three - a version bump in one place and not the others is the
+single most common way this list goes stale. When in doubt, grep the whole repo for the old
+version string before considering a bump finished.
 
 ## Build
 
+- `dotnet tool restore` once (restores `fake-cli` from `.config/dotnet-tools.json`).
+- `dotnet fake run build.fsx -t <Target>` is the primary way to build/test/release - see
+  `build.fsx` for the full target list (`Clean`, `Restore`, `Build`, `TestFast`, `TestSlow`,
+  `PackCore`/`PackWrapper`/`PackMcp`, `PushCore`/`PushWrapper`/`PushMcp`, `PublishAll`,
+  `PackMcpSelfContained`, `PackMcpMcpb`) and the Release section above for the full
+  publish sequence. The plain `dotnet`/CLI commands below still work directly for
+  finer-grained iteration during day-to-day feature work.
 - `dotnet build` (from the repo root, using `Kookerella.FsWordDsl.slnx`, or per-project).
 - Fast tests only: `dotnet test --filter "Category!=Slow"` (from `tests/
   Kookerella.FsWordDsl.Tests`).
@@ -130,7 +217,11 @@ qualification scheme avoids.
   and diffs the result's DSL structure against the committed file): `dotnet test --filter
   "Category=Slow"` - run this at least once after any `Writer.fs`/`Reader.fs`/`CodeGen.fs`
   change, not just the fast suite, and after the fast suite has populated the `.fsx` files
-  at least once (it does, every time it runs).
+  at least once (it does, every time it runs). Running either suite rewrites the committed
+  `Examples/*/output.docx`/`script.fsx` fixtures in place - OOXML zips aren't
+  byte-deterministic even when structurally identical, so `git status` showing them as
+  modified after a test run is expected noise, not a real change; `git checkout --
+  tests/Kookerella.FsWordDsl.Tests/Examples/` before committing anything else.
 - Plain `dotnet test` (no filter) runs both groups.
 - `dotnet run --project samples/Kookerella.FsWordDsl.Sample` - builds a small report,
   saves it, and reads it back, printing a summary.
