@@ -11,9 +11,11 @@ This repo ships **the F# core, a fluent C# wrapper, and an MCP server** - full p
   schema, interpreted by `Interpreter/Writer.fs` and reversed by `Interpreter/Reader.fs`.
 - `src/Kookerella.CsWordDsl` - an idiomatic, immutable, fluent C# wrapper over the F# core
   (`DocumentConverter.cs` does the two-way translation; `DocumentIO.cs` is the one place it
-  touches I/O; `CsCodeGen.cs` is its own C#-source-text decompiler, the C# analog of
-  `Interpreter/CodeGen.fs`) - see that project's own `DocumentConverter.cs` doc comment for
-  the F#-compiled-shape gotchas this needed (DU cases as `New<Case>` static factories/
+  touches file/stream I/O, and also wraps the F# core's other two ways in/out - schema-backed
+  XML/JSON and F# script generation - so a C# caller never needs its own
+  `Kookerella.FsWordDsl` reference; `CsCodeGen.cs` is its own C#-source-text decompiler, the
+  C# analog of `Interpreter/CodeGen.fs`) - see that project's own `DocumentConverter.cs` doc
+  comment for the F#-compiled-shape gotchas this needed (DU cases as `New<Case>` static factories/
   singleton properties, case field names keeping their F#-source lowercase casing unlike a
   plain record's PascalCase properties, tuples as `System.Tuple`, not `ValueTuple`).
 - `src/Kookerella.FsWordDsl.Mcp` - an MCP (Model Context Protocol) server exposing the F#

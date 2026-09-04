@@ -468,6 +468,12 @@ var script = CsCodeGen.Generate(["#:project path/to/Kookerella.CsWordDsl.csproj"
 File.WriteAllText("regenerate.cs", script);
 ```
 
+`DocumentIO` also exposes the F# core's other two ways in and out directly - schema-backed
+XML/JSON (`ToXml`/`FromXml`, `ToJson`/`FromJson`) and F# script generation
+(`GenerateFSharpScript`, `CsCodeGen.Generate`'s F#-targeting sibling) - so a C# caller never
+needs its own reference to `Kookerella.FsWordDsl` to reach any of the F# core's four I/O
+surfaces from C#.
+
 One design note worth stating explicitly: this wrapper's records use `IReadOnlyList<T>`
 properties, and C#'s compiler-synthesized record equality does not deep-compare list
 contents (two records holding equal-but-distinct list instances compare unequal via plain

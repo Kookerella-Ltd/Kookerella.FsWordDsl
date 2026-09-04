@@ -189,6 +189,27 @@ when generating against the published package rather than a local checkout). Gen
 only mentions what isn't already implied by a type's own defaults, so it reads close to how a
 human would write it by hand.
 
+`DocumentIO` also reaches the F# core's other two ways in and out - XML and JSON, each
+against a real schema - and F# script generation itself, so a C# caller never needs its own
+`Kookerella.FsWordDsl` reference to get any of them:
+
+```csharp
+var xml = DocumentIO.ToXml(loaded);   // matches the embedded Xml.xsd
+var fromXml = DocumentIO.FromXml(xml);
+
+var json = DocumentIO.ToJson(loaded); // matches Json.schema.json's shape
+var fromJson = DocumentIO.FromJson(json);
+
+var fsScript = DocumentIO.GenerateFSharpScript(["#r \"path/to/Kookerella.FsWordDsl.dll\""], "output.docx", loaded);
+```
+
+`GenerateFSharpScript` is `CsCodeGen.Generate`'s F#-targeting sibling - same "hand back
+runnable source, not just data" idea, just producing an `.fsx` for `dotnet fsi` instead of a
+C# file. `ToXml`/`FromXml`/`ToJson`/`FromJson` are thin wrappers over the F# core's own
+`Xml.fs`/`Json.fs` - no translation happens in this assembly beyond the same F#↔C# shape
+conversion `Save`/`Load` already do, so the XML/JSON is byte-for-byte what
+`Kookerella.FsWordDsl` itself would produce.
+
 See [`tests/Kookerella.CsWordDsl.Tests/DocumentTests.cs`](../../tests/Kookerella.CsWordDsl.Tests/DocumentTests.cs)
 for a worked round-trip example per feature above, and
 [`tests/Kookerella.CsWordDsl.Tests/ExampleTests.cs`](../../tests/Kookerella.CsWordDsl.Tests/ExampleTests.cs)
@@ -201,8 +222,10 @@ This wrapper covers every feature the F# core models: paragraphs and runs (inclu
 formatting within one paragraph), named styles, numbered/bulleted lists, tables (merges,
 borders, custom table style definitions), images, hyperlinks, bookmarks, comments, sections
 and page setup, headers/footers (default/first/even), document protection, footnotes/
-endnotes, track changes, content controls (all five kinds), VBA (as opaque bytes),
-`Save`/`Load`, and code generation (`CsCodeGen`).
+endnotes, track changes, content controls (all five kinds), VBA (as opaque bytes), and all
+four ways in and out the F# core itself offers: `Save`/`Load`, C# code generation
+(`CsCodeGen`), F# code generation (`DocumentIO.GenerateFSharpScript`), and schema-backed
+XML/JSON (`DocumentIO.ToXml`/`FromXml`/`ToJson`/`FromJson`).
 
 One design note worth stating explicitly: this wrapper's records use `IReadOnlyList<T>`
 properties, and C#'s compiler-synthesized record equality does not deep-compare list
