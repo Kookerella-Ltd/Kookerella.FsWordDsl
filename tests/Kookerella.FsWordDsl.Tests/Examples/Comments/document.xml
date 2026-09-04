@@ -19,8 +19,17 @@
     </section>
   </sections>
   <styles>
-    <style id="Normal" name="Normal" type="paragraph">
-      <runStyle fontFamily="Calibri" size="11" />
+    <style id="EndnoteReference" name="endnote reference" type="character">
+      <runStyle verticalPosition="superscript" />
+    </style>
+    <style id="EndnoteText" name="endnote text" type="paragraph" basedOn="Normal">
+      <runStyle size="10" />
+    </style>
+    <style id="FootnoteReference" name="footnote reference" type="character">
+      <runStyle verticalPosition="superscript" />
+    </style>
+    <style id="FootnoteText" name="footnote text" type="paragraph" basedOn="Normal">
+      <runStyle size="10" />
     </style>
     <style id="Heading1" name="heading 1" type="paragraph" basedOn="Normal">
       <runStyle size="16" bold="true" color="2F5496" />
@@ -34,29 +43,20 @@
       <runStyle size="13" bold="true" color="2F5496" />
       <paragraphFormat spacingBefore="8" spacingAfter="4" keepWithNext="true" />
     </style>
-    <style id="Title" name="Title" type="paragraph" basedOn="Normal">
-      <runStyle size="28" bold="true" />
-      <paragraphFormat spacingAfter="12" />
+    <style id="Hyperlink" name="Hyperlink" type="character">
+      <runStyle underline="single" color="0563C1" />
     </style>
     <style id="ListParagraph" name="List Paragraph" type="paragraph" basedOn="Normal">
       <paragraphFormat>
         <indentation left="36" />
       </paragraphFormat>
     </style>
-    <style id="Hyperlink" name="Hyperlink" type="character">
-      <runStyle underline="single" color="0563C1" />
+    <style id="Normal" name="Normal" type="paragraph">
+      <runStyle fontFamily="Calibri" size="11" />
     </style>
-    <style id="FootnoteReference" name="footnote reference" type="character">
-      <runStyle verticalPosition="superscript" />
-    </style>
-    <style id="EndnoteReference" name="endnote reference" type="character">
-      <runStyle verticalPosition="superscript" />
-    </style>
-    <style id="FootnoteText" name="footnote text" type="paragraph" basedOn="Normal">
-      <runStyle size="10" />
-    </style>
-    <style id="EndnoteText" name="endnote text" type="paragraph" basedOn="Normal">
-      <runStyle size="10" />
+    <style id="Title" name="Title" type="paragraph" basedOn="Normal">
+      <runStyle size="28" bold="true" />
+      <paragraphFormat spacingAfter="12" />
     </style>
   </styles>
 </document>

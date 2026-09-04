@@ -45,7 +45,30 @@ let ``Json round trips styles, numbering, and protection`` () =
 
     let json = Json.toDocument doc
     let roundTripped = Json.ofDocument json
-    Assert.Equal<StyleDefinition list>(doc.Styles, roundTripped.Styles)
-    Assert.Equal<NumberingDefinition list>(doc.Numbering, roundTripped.Numbering)
+    // Sorted before comparing on both sides - toDocument itself sorts Styles/Numbering by
+    // Id (see its own doc comment), so content, not input order, is what this asserts.
+    Assert.Equal<StyleDefinition list>(doc.Styles |> List.sortBy (fun s -> s.Id), roundTripped.Styles |> List.sortBy (fun s -> s.Id))
+    Assert.Equal<NumberingDefinition list>(doc.Numbering |> List.sortBy (fun n -> n.Id), roundTripped.Numbering |> List.sortBy (fun n -> n.Id))
     Assert.Equal<DocumentProtection option>(doc.Protection, roundTripped.Protection)
     assertJsonSchemaValid json
+
+/// The JSON equivalent of `XmlTests`' own `` Xml.toDocument produces deterministic,
+/// input-order-independent output for Styles, Numbering, and TableStyles `` - see that
+/// test's own doc comment for why this matters.
+[<Fact>]
+let ``Json.toDocument produces deterministic, input-order-independent output for Styles, Numbering, and TableStyles`` () =
+    let docA =
+        minimalDocument
+        |> withStyles [ BuiltInStyles.heading1; BuiltInStyles.normal ]
+        |> withNumbering [ numberedListDef 2; bulletListDef 1 ]
+        |> withTableStyles
+            [ { TableStyleDefinition.Default with Id = "Beta"; Name = "Beta" }
+              { TableStyleDefinition.Default with Id = "Alpha"; Name = "Alpha" } ]
+
+    let docB =
+        { docA with
+            Styles = docA.Styles |> List.rev
+            Numbering = docA.Numbering |> List.rev
+            TableStyles = docA.TableStyles |> List.rev }
+
+    Assert.Equal((Json.toDocument docA).ToJsonString(), (Json.toDocument docB).ToJsonString())

@@ -1032,16 +1032,19 @@ module Json =
     // --- Top level ------------------------------------------------------------------------
 
     /// `Document` -> `JsonObject`. See this file's own conventions above and the worked
-    /// examples in the root README.
+    /// examples in the root README. `styles`/`numbering`/`tableStyles` are sorted by `Id`
+    /// before emission - see `Xml.fs`'s own `toDocument` doc comment for why (ID-referenced
+    /// catalogs whose own list order carries no meaning, unlike `sections`' real document
+    /// order).
     let toDocument (doc: Document) : JsonObject =
         obj_
             [ "sections", Some(JsonArray(doc.Sections |> List.map sectionToJson |> Array.ofList))
-              "styles", (if doc.Styles.IsEmpty then None else Some(JsonArray(doc.Styles |> List.map styleDefinitionToJson |> Array.ofList)))
-              "numbering", (if doc.Numbering.IsEmpty then None else Some(JsonArray(doc.Numbering |> List.map numberingDefinitionToJson |> Array.ofList)))
+              "styles", (if doc.Styles.IsEmpty then None else Some(JsonArray(doc.Styles |> List.sortBy (fun s -> s.Id) |> List.map styleDefinitionToJson |> Array.ofList)))
+              "numbering", (if doc.Numbering.IsEmpty then None else Some(JsonArray(doc.Numbering |> List.sortBy (fun n -> n.Id) |> List.map numberingDefinitionToJson |> Array.ofList)))
               "protection", doc.Protection |> Option.map protectionToJson
               "vbaProject", doc.VbaProject |> Option.map (fun b -> jstr (Convert.ToBase64String(b)))
               "properties", (if doc.Properties = DocumentProperties.Default then None else Some(documentPropertiesToJson doc.Properties))
-              "tableStyles", (if doc.TableStyles.IsEmpty then None else Some(JsonArray(doc.TableStyles |> List.map tableStyleDefinitionToJson |> Array.ofList))) ]
+              "tableStyles", (if doc.TableStyles.IsEmpty then None else Some(JsonArray(doc.TableStyles |> List.sortBy (fun t -> t.Id) |> List.map tableStyleDefinitionToJson |> Array.ofList))) ]
 
     /// `JsonObject` -> `Document`, the inverse of `toDocument`.
     let ofDocument (o: JsonObject) : Document =

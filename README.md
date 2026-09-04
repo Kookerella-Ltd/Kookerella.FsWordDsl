@@ -521,6 +521,14 @@ A run with direct formatting and a hyperlink, in XML:
 has a committed `document.xml` validated against it this way as part of the same test that
 generates it.
 
+`toDocument`'s output is deterministically ordered (`Styles`/`Numbering`/`TableStyles` sorted
+by `Id`, regardless of the order the underlying `Document`'s own lists happen to be in) -
+paragraph/run content is already real document order and needs no sorting, but these three
+are ID-referenced catalogs whose own list order carries no meaning, so this is what makes
+committing `document.xml` to version control and diffing it across commits actually
+meaningful: a genuine content change produces a small, isolated diff rather than a spurious
+one from a catalog getting reshuffled between two otherwise-identical documents.
+
 ## JSON
 
 `Json.toDocument`/`Json.ofDocument` (in `Json.fs`) are a fourth way in and out of the DSL,
@@ -559,6 +567,11 @@ The same hyperlink example as above, in JSON:
   }
 }
 ```
+
+The same determinism `Xml.toDocument` has (`Styles`/`Numbering`/`TableStyles` sorted by
+`Id`) applies to `Json.toDocument`'s output too, for the same reason: a genuine content
+change produces a small, isolated diff rather than a spurious one from a catalog getting
+reshuffled between two otherwise-identical documents.
 
 Unlike XML, .NET has no built-in JSON Schema validator, so `Json.schema.json` (in the repo)
 is validated only from this repo's own test suite (via a test-only `JsonSchema.Net`

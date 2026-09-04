@@ -29,8 +29,11 @@ The XML/JSON directions each have two concrete uses beyond code generation: **bu
 `.docx` from XML/JSON a transform engine already produces** (an XSLT pipeline, or any
 templating/generation script, can target Word with no code at all), and **convert an
 existing `.docx` to XML/JSON for version control** - `.docx` is a binary ZIP, so `git diff`
-on one is useless, but `generate_xml`/`generate_json`'s output is plain, ordered text, so a
-real content change produces a legible diff instead of an opaque binary one.
+on one is useless, but `generate_xml`/`generate_json`'s output is plain, deterministically
+ordered text (paragraph/run content is real document order; the style/numbering/table-style
+catalogs are sorted by `Id` regardless of the order they happen to be in), so a real content
+change produces a legible, isolated diff instead of an opaque binary one or a spurious diff
+from a catalog getting reshuffled between two otherwise-identical documents.
 
 The round trip underneath all of this isn't just asserted - `Kookerella.FsWordDsl`'s own
 test suite builds a document, saves it, reads it back, and asserts the result is exactly the

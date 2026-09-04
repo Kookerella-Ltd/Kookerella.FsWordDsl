@@ -923,17 +923,23 @@ module Xml =
           Company = strAttr "company" el }
 
     /// `Document` -> `XElement`. See this file's own conventions above and the worked
-    /// examples in the root README.
+    /// examples in the root README. `Styles`/`Numbering`/`TableStyles` are sorted by `Id`
+    /// before emission - unlike `Sections`' own content (real document order, semantically
+    /// meaningful), these are ID-referenced catalogs whose own list order carries no
+    /// meaning, so two semantically-identical documents whose catalogs merely happen to be
+    /// built or read in a different order (e.g. two real .docx files from different
+    /// producers) still produce byte-identical output here - the same reasoning the Excel
+    /// sibling's own `Xml.fs` applies to `DefinedNames`.
     let toDocument (doc: Document) : XElement =
         XElement(
             xn "document",
             XElement(xn "sections", doc.Sections |> List.map sectionToXml),
-            (if doc.Styles.IsEmpty then [] else [ XElement(xn "styles", doc.Styles |> List.map styleDefinitionToXml) ]),
-            (if doc.Numbering.IsEmpty then [] else [ XElement(xn "numbering", doc.Numbering |> List.map numberingDefinitionToXml) ]),
+            (if doc.Styles.IsEmpty then [] else [ XElement(xn "styles", doc.Styles |> List.sortBy (fun s -> s.Id) |> List.map styleDefinitionToXml) ]),
+            (if doc.Numbering.IsEmpty then [] else [ XElement(xn "numbering", doc.Numbering |> List.sortBy (fun n -> n.Id) |> List.map numberingDefinitionToXml) ]),
             (doc.Protection |> Option.map protectionToXml |> Option.toList),
             (doc.VbaProject |> Option.map (fun b -> XElement(xn "vbaProject", Convert.ToBase64String(b))) |> Option.toList),
             (if doc.Properties = DocumentProperties.Default then [] else [ documentPropertiesToXml doc.Properties ]),
-            (if doc.TableStyles.IsEmpty then [] else [ XElement(xn "tableStyles", doc.TableStyles |> List.map tableStyleDefinitionToXml) ])
+            (if doc.TableStyles.IsEmpty then [] else [ XElement(xn "tableStyles", doc.TableStyles |> List.sortBy (fun t -> t.Id) |> List.map tableStyleDefinitionToXml) ])
         )
 
     /// `XElement` -> `Document`, the inverse of `toDocument`.

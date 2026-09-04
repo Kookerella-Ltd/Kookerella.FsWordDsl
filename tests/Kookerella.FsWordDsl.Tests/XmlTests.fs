@@ -40,7 +40,39 @@ let ``Xml round trips styles, numbering, and protection`` () =
 
     let xml = Xml.toDocument doc
     let roundTripped = Xml.ofDocument xml
-    Assert.Equal<StyleDefinition list>(doc.Styles, roundTripped.Styles)
-    Assert.Equal<NumberingDefinition list>(doc.Numbering, roundTripped.Numbering)
+    // Sorted before comparing on both sides - toDocument itself sorts Styles/Numbering by
+    // Id (see its own doc comment), so content, not input order, is what this asserts.
+    Assert.Equal<StyleDefinition list>(doc.Styles |> List.sortBy (fun s -> s.Id), roundTripped.Styles |> List.sortBy (fun s -> s.Id))
+    Assert.Equal<NumberingDefinition list>(doc.Numbering |> List.sortBy (fun n -> n.Id), roundTripped.Numbering |> List.sortBy (fun n -> n.Id))
     Assert.Equal<DocumentProtection option>(doc.Protection, roundTripped.Protection)
     assertXmlSchemaValid (XDocument(xml))
+
+/// The property that makes committing `document.xml` to source control and diffing it
+/// across commits actually meaningful: two `Document` values with the same content but
+/// differently-ordered `Styles`/`Numbering`/`TableStyles` (as they'd naturally be if e.g.
+/// two real .docx files from different producers happened to declare the same style/
+/// numbering catalog in a different order - these are ID-referenced catalogs, so their own
+/// list order carries no semantic meaning, unlike `Sections`' real document order) must
+/// produce byte-identical `toDocument` output. Without this, a re-generated XML could show
+/// a spurious diff (styles shuffled) with no real content change - the same property the
+/// Excel sibling's own `` Xml.ofWorkbook produces deterministic, input-order-independent
+/// output `` test proves for `DefinedNames`.
+[<Fact>]
+let ``Xml.toDocument produces deterministic, input-order-independent output for Styles, Numbering, and TableStyles`` () =
+    let docA =
+        minimalDocument
+        |> withStyles [ BuiltInStyles.heading1; BuiltInStyles.normal ]
+        |> withNumbering [ numberedListDef 2; bulletListDef 1 ]
+        |> withTableStyles
+            [ { TableStyleDefinition.Default with Id = "Beta"; Name = "Beta" }
+              { TableStyleDefinition.Default with Id = "Alpha"; Name = "Alpha" } ]
+
+    let docB =
+        { docA with
+            Styles = docA.Styles |> List.rev
+            Numbering = docA.Numbering |> List.rev
+            TableStyles = docA.TableStyles |> List.rev }
+
+    // docA and docB are *not* structurally equal as F# values (their lists are in different
+    // orders) - the property under test is that they still render to identical XML.
+    Assert.Equal((Xml.toDocument docA).ToString(), (Xml.toDocument docB).ToString())
