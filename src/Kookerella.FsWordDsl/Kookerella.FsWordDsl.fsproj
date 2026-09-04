@@ -11,7 +11,7 @@
          overridden here. Version is a plain field to bump by hand per release - there's
          no CI/release pipeline driving it yet (see CLAUDE.md: this repo currently ships
          the F# core only). -->
-    <Version>0.1.0</Version>
+    <Version>0.1.1</Version>
     <Authors>Kookerella</Authors>
     <Company>Kookerella Ltd</Company>
     <Description>A typesafe F# DSL for building and reading Word documents (.docx/.dotm), interpreted into calls against the DocumentFormat.OpenXml SDK. Unlike write-only Word generators, this round-trips and can decompile an existing file into equivalent, runnable F# source (Document.generateScript), plain XML against a real embedded schema (Xml.ofDocument/Xml.toDocument, Xml.xsd), or plain JSON (Json.ofDocument/Json.toDocument) - read a real document, get back the code or data that rebuilds it. Covers paragraphs and runs (rich, independently-styled text), named styles, numbered/bulleted lists, tables, images, hyperlinks, bookmarks, comments, sections and page setup, headers/footers, document protection, and VBA macro embedding.</Description>
