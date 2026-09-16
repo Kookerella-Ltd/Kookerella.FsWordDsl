@@ -161,19 +161,26 @@ documented inline in that file's own comments.
    right before publishing rather than reusing an older session. The registry publish will
    itself reject the request with a clear error if the NuGet version it references isn't
    indexed yet - that's the signal to wait, not a real failure.
-4. **Standalone binaries / GitHub Release**, only when worth cutting a new platform build:
-   `dotnet fake run build.fsx -t PackMcpSelfContained` (six self-contained single-file
-   executables, one per `win-x64`/`win-arm64`/`linux-x64`/`linux-arm64`/`osx-x64`/
-   `osx-arm64`) and/or `-t PackMcpMcpb` (the same six, repackaged as Claude Desktop's
-   one-click `.mcpb` bundle format - needs `npm install -g @anthropic-ai/mcpb` on PATH
-   first). Deliberately **not** chained into `PublishAll` - uploading these as GitHub
-   Release assets is its own separate, explicitly-triggered step (`gh release create
-   v<version> <assets...>`), the same reasoning as the MCP Registry sync needing a human
-   login: this needs a human decision about when a new platform build is worth cutting, not
-   something that should happen on every NuGet release automatically. Native AOT was tried
-   and rejected empirically for this target, not just assumed impractical - see `build.fsx`'s
-   own comment on `selfContainedRids` for why (F#'s `sprintf`/`printf`/`failwithf` machinery
-   is reflection-based in a way Native AOT's trimmer can't resolve statically).
+4. **Standalone binaries / GitHub Release**: `release.yml` runs `PackMcpSelfContained` (six
+   self-contained single-file executables, one per `win-x64`/`win-arm64`/`linux-x64`/
+   `linux-arm64`/`osx-x64`/`osx-arm64`) and `PublishMcpSelfContained` (uploads those zips as
+   GitHub Release assets via `gh release create`, tagged to match the Mcp package's own
+   version) as two `--single-target` steps straight after `PublishAll` succeeds - automated
+   the same way NuGet publishing itself is, so the standalone binaries can no longer quietly
+   fall behind NuGet the way they used to when this was a manual step (mirrors the exact
+   fix the Excel sibling made after its own standalone binaries sat a full version stale for
+   weeks unnoticed). Kept as its own target rather than merged into `PublishAll`, so that
+   target's own meaning stays exactly "publish the three NuGet/tool packages." Idempotent
+   the same way `push` is - `PublishMcpSelfContained` skips if a release for that tag already
+   exists rather than failing. `.mcpb` bundles (`-t PackMcpMcpb`, Claude Desktop's one-click
+   bundle format - needs `npm install -g @anthropic-ai/mcpb` on PATH) are **not** part of
+   this automated step - still a manual, explicitly-triggered addition to an existing release
+   (`mcpb pack` has been observed to hang after finishing its actual work, at least once, on
+   one RID out of six - not something to trust unattended in CI yet). Native AOT was tried
+   and rejected empirically for the self-contained builds, not just assumed impractical - see
+   `build.fsx`'s own comment on `selfContainedRids` for why (F#'s `sprintf`/`printf`/
+   `failwithf` machinery is reflection-based in a way Native AOT's trimmer can't resolve
+   statically).
 
 ## Keep these in sync
 
@@ -210,9 +217,9 @@ version string before considering a bump finished.
 - `dotnet fake run build.fsx -t <Target>` is the primary way to build/test/release - see
   `build.fsx` for the full target list (`Clean`, `Restore`, `Build`, `TestFast`, `TestSlow`,
   `PackCore`/`PackWrapper`/`PackMcp`, `PushCore`/`PushWrapper`/`PushMcp`, `PublishAll`,
-  `PackMcpSelfContained`, `PackMcpMcpb`) and the Release section above for the full
-  publish sequence. The plain `dotnet`/CLI commands below still work directly for
-  finer-grained iteration during day-to-day feature work.
+  `PackMcpSelfContained`, `PublishMcpSelfContained`, `PackMcpMcpb`) and the Release section
+  above for the full publish sequence. The plain `dotnet`/CLI commands below still work
+  directly for finer-grained iteration during day-to-day feature work.
 - `dotnet build` (from the repo root, using `Kookerella.FsWordDsl.slnx`, or per-project).
 - Fast tests only: `dotnet test --filter "Category!=Slow"` (from `tests/
   Kookerella.FsWordDsl.Tests`).
