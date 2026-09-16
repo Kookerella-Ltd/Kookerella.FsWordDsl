@@ -32,6 +32,11 @@ capabilities as tools any MCP-compatible AI agent can call directly, and doubles
 CLI (`fsworddsl-mcp convert`/`build`) for anyone not going through an MCP client at all -
 see [its own README](src/Kookerella.FsWordDsl.Mcp/README.md) for the full tool list.
 
+**Don't have .NET installed?** Download a self-contained build of the MCP server for your
+platform (win/linux/osx, x64/arm64) from the
+[Releases page](https://github.com/Kookerella-Ltd/Kookerella.FsWordDsl/releases) - unzip and
+run, no install required.
+
 ## Layout
 
 - `src/Kookerella.FsWordDsl` - the library.

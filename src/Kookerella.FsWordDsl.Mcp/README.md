@@ -55,6 +55,11 @@ dotnet tool install -g Kookerella.FsWordDsl.Mcp
 
 This installs the `fsworddsl-mcp` command onto your PATH.
 
+**Don't have .NET installed?** Download a self-contained build for your platform
+(win/linux/osx, x64/arm64) from the
+[Releases page](https://github.com/Kookerella-Ltd/Kookerella.FsWordDsl/releases) instead -
+unzip and run, no install required.
+
 ## Configure your MCP client
 
 Point your client at the installed command. For example, in a client that reads a JSON
